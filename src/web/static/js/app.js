@@ -23,6 +23,37 @@ function apiUrl(endpoint) {
     return makeUrl('/api' + endpoint);
 }
 
+// ==========================================
+// ApiClient — centralised fetch wrapper
+// ==========================================
+class ApiClient {
+    constructor(basePath) {
+        this.basePath = basePath || '';
+    }
+
+    _url(endpoint) {
+        if (!endpoint.startsWith('/')) endpoint = '/' + endpoint;
+        return this.basePath + '/api' + endpoint;
+    }
+
+    async _request(method, endpoint, body, signal) {
+        const opts = { method, headers: { 'Content-Type': 'application/json' }, signal };
+        if (body !== undefined) opts.body = JSON.stringify(body);
+        const res = await fetch(this._url(endpoint), opts);
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.detail || err.message || `HTTP ${res.status}`);
+        }
+        return res.json();
+    }
+
+    get(endpoint, signal)        { return this._request('GET',    endpoint, undefined, signal); }
+    post(endpoint, body, signal) { return this._request('POST',   endpoint, body,      signal); }
+    del(endpoint, signal)        { return this._request('DELETE', endpoint, undefined, signal); }
+}
+
+window.api = new ApiClient(window.BOXARR_BASE_PATH || '');
+
 // Helper to check if current path matches a given path (handling base path)
 function isCurrentPath(targetPath) {
     const currentPath = window.location.pathname;
@@ -392,35 +423,53 @@ function reloadScheduler() {
             });
     }
 
-    /**
-     * Show a temporary message to the user
-     */
-    function showMessage(message, type = 'info') {
-        console.log(`[${type}] ${message}`);
-        
-        // Create toast notification
+    // Toast queue — max 3 visible at once
+    const MAX_TOASTS = 3;
+    const toastQueue = [];
+    let toastContainer = null;
+
+    function getToastContainer() {
+        if (!toastContainer) {
+            toastContainer = document.createElement('div');
+            toastContainer.className = 'toast-container';
+            toastContainer.setAttribute('role', 'alert');
+            toastContainer.setAttribute('aria-live', 'assertive');
+            toastContainer.setAttribute('aria-atomic', 'false');
+            document.body.appendChild(toastContainer);
+        }
+        return toastContainer;
+    }
+
+    function processToastQueue() {
+        const container = getToastContainer();
+        const active = container.querySelectorAll('.toast:not(.toast-exit)').length;
+        while (toastQueue.length > 0 && active < MAX_TOASTS) {
+            const { message, type } = toastQueue.shift();
+            _renderToast(message, type);
+        }
+    }
+
+    function _renderToast(message, type) {
+        const container = getToastContainer();
         const toast = document.createElement('div');
         toast.className = `toast toast-${type}`;
         toast.textContent = message;
-        toast.style.cssText = `
-            position: fixed;
-            top: 20px;
-            right: 20px;
-            padding: 1rem 1.5rem;
-            background: ${type === 'success' ? '#48bb78' : type === 'error' ? '#f56565' : '#667eea'};
-            color: white;
-            border-radius: 8px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-            z-index: 10000;
-            animation: slideIn 0.3s ease;
-        `;
-        
-        document.body.appendChild(toast);
-        
-        setTimeout(() => {
-            toast.style.animation = 'slideOut 0.3s ease';
-            setTimeout(() => toast.remove(), 300);
-        }, 3000);
+        function dismiss() {
+            toast.classList.add('toast-exit');
+            setTimeout(() => { toast.remove(); processToastQueue(); }, 300);
+        }
+        container.appendChild(toast);
+        setTimeout(dismiss, 3000);
+    }
+
+    function showMessage(message, type = 'info') {
+        console.log(`[${type}] ${message}`);
+        const active = getToastContainer().querySelectorAll('.toast:not(.toast-exit)').length;
+        if (active >= MAX_TOASTS) {
+            toastQueue.push({ message, type });
+        } else {
+            _renderToast(message, type);
+        }
     }
 
     // ==========================================
@@ -1436,11 +1485,25 @@ function reloadScheduler() {
     // Initialize on DOM Load
     // ==========================================
 
+    function startConnectionPolling() {
+        clearInterval(statusCheckInterval);
+        statusCheckInterval = setInterval(checkConnection, 30000);
+    }
+
+    document.addEventListener('visibilitychange', function() {
+        if (document.hidden) {
+            clearInterval(statusCheckInterval);
+        } else {
+            startConnectionPolling();
+            checkConnection();
+        }
+    });
+
     document.addEventListener('DOMContentLoaded', function() {
         // Check connection status
         checkConnection();
-        setInterval(checkConnection, 30000);
-        
+        startConnectionPolling();
+
         // Check for updates (only once on page load)
         checkForUpdates();
         
@@ -1571,6 +1634,57 @@ function reloadScheduler() {
                 isModalOpen = false;
             }
         });
+
+        // Focus trap for accessible modals
+        (function () {
+            const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+            let prevFocused = null;
+            let trapHandler = null;
+            let watchedModal = null;
+
+            function getFocusable(el) {
+                return [...el.querySelectorAll(FOCUSABLE)].filter(
+                    e => getComputedStyle(e).display !== 'none' && !e.closest('[hidden]')
+                );
+            }
+
+            function trapFocus(modal) {
+                prevFocused = document.activeElement;
+                watchedModal = modal;
+                const focusable = getFocusable(modal);
+                if (focusable.length) focusable[0].focus();
+                trapHandler = function (e) {
+                    if (e.key !== 'Tab') return;
+                    const focusable = getFocusable(modal);
+                    if (!focusable.length) { e.preventDefault(); return; }
+                    const first = focusable[0], last = focusable[focusable.length - 1];
+                    if (e.shiftKey) {
+                        if (document.activeElement === first) { e.preventDefault(); last.focus(); }
+                    } else {
+                        if (document.activeElement === last) { e.preventDefault(); first.focus(); }
+                    }
+                };
+                modal.addEventListener('keydown', trapHandler);
+            }
+
+            function releaseFocus(modal) {
+                if (trapHandler && modal) modal.removeEventListener('keydown', trapHandler);
+                trapHandler = null;
+                watchedModal = null;
+                if (prevFocused && typeof prevFocused.focus === 'function') prevFocused.focus();
+                prevFocused = null;
+            }
+
+            document.querySelectorAll('.modal').forEach(function (modal) {
+                new MutationObserver(function () {
+                    if (modal.classList.contains('show')) {
+                        trapFocus(modal);
+                    } else if (watchedModal === modal) {
+                        releaseFocus(modal);
+                    }
+                }).observe(modal, { attributes: true, attributeFilter: ['class'] });
+            });
+        }());
     });
 
     // Cleanup on page unload
@@ -1601,40 +1715,89 @@ function reloadScheduler() {
     };
 
     window.refreshStoredMovieStatuses = async function (buttonEl) {
-        const originalText = buttonEl ? buttonEl.textContent : 'Refresh Radarr Status';
+        if (!buttonEl) return;
 
-        if (buttonEl) {
-            buttonEl.disabled = true;
-            buttonEl.textContent = 'Refreshing...';
-        }
+        const labelEl = buttonEl.querySelector('.btn-label');
+
+        const resetBtn = () => {
+            buttonEl.disabled = false;
+            buttonEl.classList.remove('loading');
+            if (labelEl) labelEl.textContent = 'Refresh Radarr Status';
+        };
+
+        // Enter loading state
+        buttonEl.disabled = true;
+        buttonEl.classList.add('loading');
+        if (labelEl) labelEl.textContent = 'Fetching from Radarr…';
+
+        let pollInterval = null;
+        let pollFailures = 0;
+        const MAX_POLL_FAILURES = 5;
+        const MAX_POLL_MS = 10 * 60 * 1000; // 10-minute safety timeout
+        const pollStart = Date.now();
+
+        const stopPolling = () => {
+            if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
+        };
 
         try {
-            const response = await fetch(apiUrl('/movies/refresh-stored-status'), {
-                method: 'POST'
-            });
-            const data = await response.json();
-
-            if (!response.ok || !data.success) {
-                throw new Error(data.detail || data.message || 'Failed to refresh movie data');
+            const res = await fetch(apiUrl('/movies/refresh-stored-status'), { method: 'POST' });
+            const data = await res.json();
+            if (!res.ok || !data.success) {
+                throw new Error(data.detail || data.message || 'Failed to start refresh');
             }
 
-            showMessage(
-                `Refreshed ${data.movies_refreshed || 0} movie entries across ${data.weeks_updated || 0} weeks`,
-                'success'
-            );
-            setTimeout(() => window.location.reload(), 800);
+            pollInterval = setInterval(async () => {
+                if (Date.now() - pollStart > MAX_POLL_MS) {
+                    stopPolling();
+                    resetBtn();
+                    showMessage('Refresh is taking too long. It may still be running in the background.', 'error');
+                    return;
+                }
+
+                try {
+                    const pr = await fetch(apiUrl('/movies/refresh-stored-status/progress'));
+                    if (!pr.ok) {
+                        if (++pollFailures >= MAX_POLL_FAILURES) {
+                            stopPolling();
+                            resetBtn();
+                            showMessage('Lost connection to refresh progress. The job may still be running.', 'error');
+                        }
+                        return;
+                    }
+                    pollFailures = 0;
+                    const p = await pr.json();
+
+                    if (p.error) {
+                        stopPolling();
+                        resetBtn();
+                        showMessage('Refresh failed: ' + p.error, 'error');
+                        return;
+                    }
+
+                    if (p.complete) {
+                        stopPolling();
+                        showMessage(
+                            `Refreshed ${p.refreshed || 0} movies across ${p.updated || 0} weeks`,
+                            'success'
+                        );
+                        resetBtn();
+                        setTimeout(() => { window.location.href = window.location.href; }, 1500);
+                    }
+                } catch (pollErr) {
+                    console.warn('Refresh poll error:', pollErr);
+                    if (++pollFailures >= MAX_POLL_FAILURES) {
+                        stopPolling();
+                        resetBtn();
+                        showMessage('Lost connection to refresh progress. The job may still be running.', 'error');
+                    }
+                }
+            }, 500);
+
         } catch (error) {
-            showMessage('Failed to refresh stored movie data: ' + error.message, 'error');
-            if (buttonEl) {
-                buttonEl.disabled = false;
-                buttonEl.textContent = originalText;
-            }
-            return;
-        }
-
-        if (buttonEl) {
-            buttonEl.disabled = false;
-            buttonEl.textContent = originalText;
+            stopPolling();
+            resetBtn();
+            showMessage('Failed to start refresh: ' + error.message, 'error');
         }
     };
 
@@ -1703,7 +1866,7 @@ function reloadScheduler() {
             }
         } catch (err) {
             buttonEl.textContent = origText;
-            showToast('Error: ' + err.message, 'error');
+            showMessage('Error: ' + err.message, 'error');
         } finally {
             buttonEl.disabled = false;
         }
