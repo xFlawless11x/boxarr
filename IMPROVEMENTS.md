@@ -1,6 +1,6 @@
 # Boxarr Improvement Plan
 
-> Last deep review: `feature/final-fixes` (v1.7.5) — 2026-04-23.  
+> Last deep review: `feature/final-fixes` (v1.7.8) — 2026-04-23.  
 > Work through this cycle-by-cycle. Check boxes as items land. Each section includes
 > the exact file, the problem, and a concrete implementation approach.
 
@@ -891,8 +891,8 @@ Small surface area, high severity. Each item is 5–30 lines. Do as one branch.
 
 ---
 
-### 6.1 — Run Docker Container as Non-Root User
-- **File:** `Dockerfile`
+### ✅ 6.1 — Run Docker Container as Non-Root User
+- **File:** `Dockerfile`, `docker-entrypoint.sh`, `src/utils/logger.py`
 - **Problem:** The container runs as root. If the application is compromised, the attacker has full root access inside the container and potential host escape.
 - **Approach:**
   ```dockerfile
@@ -903,25 +903,27 @@ Small surface area, high severity. Each item is 5–30 lines. Do as one branch.
   USER boxarr
   ```
   Also document: `docker run --security-opt=no-new-privileges:true` in compose and README.
-- [ ] Done
+- **Follow-up fix (v1.7.8):** Docker volume mounts override image-level `chown`, so `USER boxarr` crashed on `/config/logs`. Fixed with `gosu` entrypoint (`docker-entrypoint.sh`) that chowns `/config` as root then drops privileges. Added try/except fallback in `logger.py` for restricted environments.
+- [x] Done
 
 ---
 
-### 6.2 — Stop Silencing Security Scan Failures in CI
+### ✅ 6.2 — Stop Silencing Security Scan Failures in CI
 - **File:** `.github/workflows/ci.yml`
 - **Problem:** Both Bandit and Safety commands end with `|| true`, meaning any discovered vulnerability causes the CI step to pass. The reports are generated but never enforced. This false green builds false confidence.
 - **Approach:** Remove `|| true` from both commands. Keep `--skip B104,B608` for intentional suppressions. Add `# nosec B...` inline annotations with justification for any legitimate findings that should be suppressed.
   ```yaml
   - name: Run Bandit (Security Linter)
     run: |
-      bandit -r src/ -f json -o bandit-report.json --skip B104,B608
+      bandit -r src/ -f json -o bandit-report.json --skip B104,B608 --exit-zero
       bandit -r src/ --severity-level medium --skip B104,B608
   ```
-- [ ] Done
+  **Note:** `safety scan` v3+ requires interactive auth in CI — replaced with `pip-audit` (PyPA, OSV database, no auth required).
+- [x] Done
 
 ---
 
-### 6.3 — Fix XSS: Escape HTML in Widget Generation
+### ✅ 6.3 — Fix XSS: Escape HTML in Widget Generation
 - **File:** `src/api/routes/web.py`
 - **Problem:** The admin widget endpoint builds an HTML string using an f-string that inserts movie titles directly without escaping. A title containing `<script>` or `"` breaks the HTML structure.
 - **Approach:**
@@ -931,7 +933,8 @@ Small surface area, high severity. Each item is 5–30 lines. Do as one branch.
   f"<li>{html.escape(m['title'])}</li>"
   ```
   Audit all other f-string HTML in routes — replace every `{title}` or `{name}` inside an HTML literal with `{html.escape(value)}`.
-- [ ] Done
+  **Note:** Hit a variable shadowing bug — local `html = f"""..."""` clashed with `import html`. Fixed by renaming the local variable to `widget_html` and extracting the `items` string separately.
+- [x] Done
 
 ---
 
@@ -943,7 +946,7 @@ Small surface area, high severity. Each item is 5–30 lines. Do as one branch.
 
 ---
 
-### 6.5 — Validate localStorage Theme Value
+### ✅ 6.5 — Validate localStorage Theme Value
 - **File:** `src/web/static/js/theme-manager.js`
 - **Problem:** The theme is read from `localStorage.getItem('theme')` and applied without validation. A stored value like `"><img src=x onerror=alert(1)>` would be passed to DOM operations.
 - **Approach:**
@@ -953,7 +956,7 @@ Small surface area, high severity. Each item is 5–30 lines. Do as one branch.
   const theme = VALID_THEMES.includes(stored) ? stored : 'light';
   ```
   Also wrap all `localStorage` calls in try/catch for private-browsing environments where `localStorage` throws.
-- [ ] Done
+- [x] Done
 
 ---
 
@@ -963,7 +966,7 @@ Correctness bugs. No new features — just making existing flows not break under
 
 ---
 
-### 7.1 — Thread Locks on Module-Level Caches
+### ✅ 7.1 — Thread Locks on Module-Level Caches
 - **Files:** `src/core/radarr.py`, `src/utils/config.py`
 - **Problem:** `_quality_profiles_cache`, `_root_folders_cache` (radarr.py) and the global `_settings` (config.py) are dicts mutated by multiple threads without locks. The scheduler runs in a `ThreadPoolExecutor`; if two jobs overlap, cache writes can interleave and produce corrupt state.
 - **Approach:**
@@ -982,11 +985,11 @@ Correctness bugs. No new features — just making existing flows not break under
       return data
   ```
   Same pattern for `_root_folders_cache` and for the Settings singleton reload in `config.py`.
-- [ ] Done
+- [x] Done
 
 ---
 
-### 7.2 — Remaining Blocking Calls in Async Handlers
+### ✅ 7.2 — Remaining Blocking Calls in Async Handlers
 - **File:** `src/api/routes/config.py`
 - **Problem:** `save_configuration` calls `test_service.test_connection()` (a blocking `httpx` call) on line 184 inside an `async def` without `asyncio.to_thread()`. This blocks the event loop for the duration of the Radarr HTTP round-trip.
 - **Approach:**
@@ -995,11 +998,11 @@ Correctness bugs. No new features — just making existing flows not break under
       return {"success": False, "message": "Cannot save: Radarr connection failed"}
   ```
   Audit all remaining `async def` route handlers for any bare synchronous HTTP calls. A grep for `\.test_connection()` and `\.get_` outside of `to_thread` is the fastest way to find remaining instances.
-- [ ] Done
+- [x] Done
 
 ---
 
-### 7.3 — Prevent Double-Submit on Action Buttons
+### ✅ 7.3 — Prevent Double-Submit on Action Buttons
 - **File:** `src/web/static/js/app.js`, `src/web/static/js/dashboard.js`
 - **Problem:** "Add to Radarr", "Ignore", "Upgrade", "Update Range" and "Regenerate Week" buttons are not disabled during the in-flight request. Rapid clicks send multiple identical API calls. `RangeProcessor` will start a second full range pass if the user clicks Submit while one is running.
 - **Approach:** A shared helper:
@@ -1016,11 +1019,11 @@ Correctness bugs. No new features — just making existing flows not break under
   }
   ```
   Wrap every action button's click handler with this. For `RangeProcessor`, add an `isRunning` guard at the top of `processRange()`.
-- [ ] Done
+- [x] Done
 
 ---
 
-### 7.4 — AbortController + Fetch Timeout on ApiClient
+### ✅ 7.4 — AbortController + Fetch Timeout on ApiClient
 - **File:** `src/web/static/js/app.js`
 - **Problem:** The global `ApiClient` (and all raw `fetch()` calls throughout app.js / dashboard.js) have no timeout. If the Boxarr server is slow or unreachable, the request hangs forever — no spinner ever stops, no error is shown.
 - **Approach:** Add to `ApiClient.request()`:
@@ -1037,11 +1040,11 @@ Correctness bugs. No new features — just making existing flows not break under
   }
   ```
   Also cancel pending requests on navigation: store the AbortController for the search debounce and status-poll and call `.abort()` on `beforeunload` / `pagehide`.
-- [ ] Done
+- [x] Done
 
 ---
 
-### 7.5 — Clear Polling Intervals on Page Unload
+### ✅ 7.5 — Clear Polling Intervals on Page Unload
 - **File:** `src/web/static/js/app.js`
 - **Problem:** `setInterval` for Radarr status polling and the connection-status check run indefinitely. In SPAs or tabbed browsing, these survive across navigations and accumulate, eventually hammering the API.
 - **Approach:**
@@ -1051,11 +1054,11 @@ Correctness bugs. No new features — just making existing flows not break under
   intervals.push(setInterval(checkConnectionStatus, 30_000));
   window.addEventListener('pagehide', () => intervals.forEach(clearInterval));
   ```
-- [ ] Done
+- [x] Done
 
 ---
 
-### 7.6 — Input Validation: Page Number and TMDB ID Bounds
+### ✅ 7.6 — Input Validation: Page Number and TMDB ID Bounds
 - **Files:** `src/api/routes/web.py`, `src/api/routes/movies.py`
 - **Problem:** The `page` query parameter in the overview route is not clamped — a request with `?page=-1` or `?page=99999` produces an empty grid with no error. Similarly, `/{tmdb_id}/weeks` accepts negative TMDB IDs.
 - **Approach:**
@@ -1067,7 +1070,7 @@ Correctness bugs. No new features — just making existing flows not break under
   if tmdb_id <= 0:
       raise HTTPException(status_code=400, detail="Invalid TMDB ID")
   ```
-- [ ] Done
+- [x] Done
 
 ---
 
@@ -1345,7 +1348,7 @@ Low-risk cleanup that reduces maintenance burden and improves accessibility.
 
 ## Summary Checklist by Priority
 
-> Last updated: 2026-04-23 — v1.7.5 on `feature/final-fixes`
+> Last updated: 2026-04-23 — v1.7.8 on `feature/final-fixes`
 
 ### Completed (Phases 1–4 + Cross-cutting)
 - [x] 1.1 GZip middleware
@@ -1377,11 +1380,11 @@ Low-risk cleanup that reduces maintenance burden and improves accessibility.
 - [x] O.4 theme-color meta tag
 
 ### Phase 6 — Security Hardening
-- [ ] 6.1 Docker non-root user
-- [ ] 6.2 Stop silencing CI security scans (remove || true)
-- [ ] 6.3 XSS: html.escape() in web.py widget HTML
+- [x] 6.1 Docker non-root user (gosu entrypoint + logger.py fallback — v1.7.8)
+- [x] 6.2 Stop silencing CI security scans (removed || true; pip-audit replaces safety)
+- [x] 6.3 XSS: html.escape() in web.py widget HTML
 - [x] 6.4 XSS: toast innerHTML → textContent (already correct in codebase)
-- [ ] 6.5 Validate localStorage theme value in theme-manager.js
+- [x] 6.5 Validate localStorage theme value in theme-manager.js
 
 ### Phase 7 — Reliability & Race Conditions
 - [x] 7.1 Thread locks on module-level caches (radarr.py, config.py)
