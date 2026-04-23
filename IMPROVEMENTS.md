@@ -1,6 +1,6 @@
 # Boxarr Improvement Plan
 
-> Generated from deep code review of `feature/mobile-ui-overhaul` (v1.7.1).  
+> Last deep review: `feature/final-fixes` (v1.7.5) — 2026-04-23.  
 > Work through this cycle-by-cycle. Check boxes as items land. Each section includes
 > the exact file, the problem, and a concrete implementation approach.
 
@@ -885,9 +885,538 @@ These don't fit a single phase but should be addressed as files are touched.
 
 ---
 
+## Phase 6 — Security Hardening
+
+Small surface area, high severity. Each item is 5–30 lines. Do as one branch.
+
+---
+
+### 6.1 — Run Docker Container as Non-Root User
+- **File:** `Dockerfile`
+- **Problem:** The container runs as root. If the application is compromised, the attacker has full root access inside the container and potential host escape.
+- **Approach:**
+  ```dockerfile
+  # After pip install, before COPY src
+  RUN groupadd -r boxarr && useradd -r -g boxarr -d /app -s /sbin/nologin boxarr
+  # After final COPY
+  RUN chown -R boxarr:boxarr /app
+  USER boxarr
+  ```
+  Also document: `docker run --security-opt=no-new-privileges:true` in compose and README.
+- [ ] Done
+
+---
+
+### 6.2 — Stop Silencing Security Scan Failures in CI
+- **File:** `.github/workflows/ci.yml`
+- **Problem:** Both Bandit and Safety commands end with `|| true`, meaning any discovered vulnerability causes the CI step to pass. The reports are generated but never enforced. This false green builds false confidence.
+- **Approach:** Remove `|| true` from both commands. Keep `--skip B104,B608` for intentional suppressions. Add `# nosec B...` inline annotations with justification for any legitimate findings that should be suppressed.
+  ```yaml
+  - name: Run Bandit (Security Linter)
+    run: |
+      bandit -r src/ -f json -o bandit-report.json --skip B104,B608
+      bandit -r src/ --severity-level medium --skip B104,B608
+  ```
+- [ ] Done
+
+---
+
+### 6.3 — Fix XSS: Escape HTML in Widget Generation
+- **File:** `src/api/routes/web.py`
+- **Problem:** The admin widget endpoint builds an HTML string using an f-string that inserts movie titles directly without escaping. A title containing `<script>` or `"` breaks the HTML structure.
+- **Approach:**
+  ```python
+  import html
+  # Wherever movie titles are embedded in HTML strings:
+  f"<li>{html.escape(m['title'])}</li>"
+  ```
+  Audit all other f-string HTML in routes — replace every `{title}` or `{name}` inside an HTML literal with `{html.escape(value)}`.
+- [ ] Done
+
+---
+
+### ✅ 6.4 — Fix XSS: Toast Content via textContent not innerHTML
+- **File:** `src/web/static/js/app.js`
+- **Problem:** The `_renderToast()` function sets toast message content via `.innerHTML`, which executes any embedded HTML/JS if the message string originates from an API error response or user-controlled input.
+- **Note:** Already implemented correctly — `_renderToast()` uses `toast.textContent = message` in the current codebase. No change needed.
+- [ ] Done
+
+---
+
+### 6.5 — Validate localStorage Theme Value
+- **File:** `src/web/static/js/theme-manager.js`
+- **Problem:** The theme is read from `localStorage.getItem('theme')` and applied without validation. A stored value like `"><img src=x onerror=alert(1)>` would be passed to DOM operations.
+- **Approach:**
+  ```js
+  const VALID_THEMES = ['light', 'dark', 'auto'];
+  const stored = localStorage.getItem('theme');
+  const theme = VALID_THEMES.includes(stored) ? stored : 'light';
+  ```
+  Also wrap all `localStorage` calls in try/catch for private-browsing environments where `localStorage` throws.
+- [ ] Done
+
+---
+
+## Phase 7 — Reliability & Race Condition Fixes
+
+Correctness bugs. No new features — just making existing flows not break under concurrent or rapid use.
+
+---
+
+### 7.1 — Thread Locks on Module-Level Caches
+- **Files:** `src/core/radarr.py`, `src/utils/config.py`
+- **Problem:** `_quality_profiles_cache`, `_root_folders_cache` (radarr.py) and the global `_settings` (config.py) are dicts mutated by multiple threads without locks. The scheduler runs in a `ThreadPoolExecutor`; if two jobs overlap, cache writes can interleave and produce corrupt state.
+- **Approach:**
+  ```python
+  import threading
+  _cache_lock = threading.Lock()
+
+  def get_quality_profiles(self):
+      with _cache_lock:
+          if time.time() - _quality_profiles_cache["ts"] < TTL:
+              return _quality_profiles_cache["data"]
+      # fetch outside lock to avoid holding it during HTTP call
+      data = self._fetch_quality_profiles()
+      with _cache_lock:
+          _quality_profiles_cache.update({"ts": time.time(), "data": data})
+      return data
+  ```
+  Same pattern for `_root_folders_cache` and for the Settings singleton reload in `config.py`.
+- [ ] Done
+
+---
+
+### 7.2 — Remaining Blocking Calls in Async Handlers
+- **File:** `src/api/routes/config.py`
+- **Problem:** `save_configuration` calls `test_service.test_connection()` (a blocking `httpx` call) on line 184 inside an `async def` without `asyncio.to_thread()`. This blocks the event loop for the duration of the Radarr HTTP round-trip.
+- **Approach:**
+  ```python
+  if not await asyncio.to_thread(test_service.test_connection):
+      return {"success": False, "message": "Cannot save: Radarr connection failed"}
+  ```
+  Audit all remaining `async def` route handlers for any bare synchronous HTTP calls. A grep for `\.test_connection()` and `\.get_` outside of `to_thread` is the fastest way to find remaining instances.
+- [ ] Done
+
+---
+
+### 7.3 — Prevent Double-Submit on Action Buttons
+- **File:** `src/web/static/js/app.js`, `src/web/static/js/dashboard.js`
+- **Problem:** "Add to Radarr", "Ignore", "Upgrade", "Update Range" and "Regenerate Week" buttons are not disabled during the in-flight request. Rapid clicks send multiple identical API calls. `RangeProcessor` will start a second full range pass if the user clicks Submit while one is running.
+- **Approach:** A shared helper:
+  ```js
+  function withInFlight(btn, asyncFn) {
+      if (btn.disabled) return;
+      btn.disabled = true;
+      const original = btn.textContent;
+      btn.textContent = 'Working…';
+      asyncFn().finally(() => {
+          btn.disabled = false;
+          btn.textContent = original;
+      });
+  }
+  ```
+  Wrap every action button's click handler with this. For `RangeProcessor`, add an `isRunning` guard at the top of `processRange()`.
+- [ ] Done
+
+---
+
+### 7.4 — AbortController + Fetch Timeout on ApiClient
+- **File:** `src/web/static/js/app.js`
+- **Problem:** The global `ApiClient` (and all raw `fetch()` calls throughout app.js / dashboard.js) have no timeout. If the Boxarr server is slow or unreachable, the request hangs forever — no spinner ever stops, no error is shown.
+- **Approach:** Add to `ApiClient.request()`:
+  ```js
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30_000);
+  try {
+      const res = await fetch(url, { ...opts, signal: controller.signal });
+      clearTimeout(timer);
+      return res;
+  } catch (e) {
+      if (e.name === 'AbortError') throw new Error('Request timed out after 30s');
+      throw e;
+  }
+  ```
+  Also cancel pending requests on navigation: store the AbortController for the search debounce and status-poll and call `.abort()` on `beforeunload` / `pagehide`.
+- [ ] Done
+
+---
+
+### 7.5 — Clear Polling Intervals on Page Unload
+- **File:** `src/web/static/js/app.js`
+- **Problem:** `setInterval` for Radarr status polling and the connection-status check run indefinitely. In SPAs or tabbed browsing, these survive across navigations and accumulate, eventually hammering the API.
+- **Approach:**
+  ```js
+  const intervals = [];
+  intervals.push(setInterval(updateMovieStatuses, 30_000));
+  intervals.push(setInterval(checkConnectionStatus, 30_000));
+  window.addEventListener('pagehide', () => intervals.forEach(clearInterval));
+  ```
+- [ ] Done
+
+---
+
+### 7.6 — Input Validation: Page Number and TMDB ID Bounds
+- **Files:** `src/api/routes/web.py`, `src/api/routes/movies.py`
+- **Problem:** The `page` query parameter in the overview route is not clamped — a request with `?page=-1` or `?page=99999` produces an empty grid with no error. Similarly, `/{tmdb_id}/weeks` accepts negative TMDB IDs.
+- **Approach:**
+  ```python
+  # web.py overview route
+  page = max(1, page)
+
+  # movies.py weeks endpoint
+  if tmdb_id <= 0:
+      raise HTTPException(status_code=400, detail="Invalid TMDB ID")
+  ```
+- [ ] Done
+
+---
+
+## Phase 8 — Infrastructure & Observability
+
+Operational concerns: logging, resource limits, graceful shutdown, secrets hygiene.
+
+---
+
+### 8.1 — Docker Compose: Log Rotation and Resource Limits
+- **File:** `docker-compose.yml`
+- **Problem:** No logging driver is configured, so container logs write unbounded JSON to the Docker daemon's default location and can fill disk. No CPU/memory limits mean a runaway scrape loop could starve other containers.
+- **Approach:**
+  ```yaml
+  services:
+    boxarr:
+      logging:
+        driver: json-file
+        options:
+          max-size: "10m"
+          max-file: "3"
+      deploy:
+        resources:
+          limits:
+            cpus: '1.0'
+            memory: 512M
+          reservations:
+            cpus: '0.25'
+            memory: 128M
+  ```
+- [ ] Done
+
+---
+
+### 8.2 — Graceful Shutdown Timeout
+- **File:** `src/main.py`
+- **Problem:** Uvicorn's shutdown has no explicit timeout. A slow Radarr API call in-flight during SIGTERM can hang the process indefinitely, causing Docker to send SIGKILL and potentially corrupting in-progress JSON file writes.
+- **Approach:**
+  ```python
+  config = uvicorn.Config(
+      app,
+      host=host,
+      port=port,
+      timeout_graceful_shutdown=30,  # seconds
+  )
+  ```
+  Also wrap the scheduler's `stop()` call in a timeout: `scheduler.stop(wait=True)` with a thread join timeout.
+- [ ] Done
+
+---
+
+### 8.3 — Scrub Secrets from Log Output
+- **File:** `src/utils/logger.py`
+- **Problem:** Exception tracebacks and error messages can include the Radarr API key (it appears in URL construction errors) or the full Radarr URL with embedded credentials. These land in plaintext log files.
+- **Approach:** Add a custom `logging.Filter`:
+  ```python
+  import re
+
+  class ScrubSecretsFilter(logging.Filter):
+      PATTERNS = [
+          (re.compile(r'(api[_-]?key[=: ]+)\S+', re.I), r'\1***'),
+          (re.compile(r'(Authorization:\s*)\S+', re.I), r'\1***'),
+      ]
+      def filter(self, record):
+          msg = str(record.getMessage())
+          for pattern, repl in self.PATTERNS:
+              msg = pattern.sub(repl, msg)
+          record.msg = msg
+          record.args = ()
+          return True
+  ```
+  Attach to both the file handler and the console handler.
+- [ ] Done
+
+---
+
+### 8.4 — Validate Cron Expression at Config Load Time
+- **File:** `src/utils/config.py`
+- **Problem:** `boxarr_scheduler_cron` accepts any string. An invalid expression like `"not a cron"` is stored successfully and only fails when APScheduler tries to create the job at startup — producing a cryptic error far from the original bad input.
+- **Approach:**
+  ```python
+  from apscheduler.triggers.cron import CronTrigger
+  from pydantic import field_validator
+
+  @field_validator('boxarr_scheduler_cron')
+  @classmethod
+  def validate_cron(cls, v: str) -> str:
+      try:
+          CronTrigger.from_crontab(v)
+      except (ValueError, TypeError) as e:
+          raise ValueError(f"Invalid cron expression '{v}': {e}") from e
+      return v
+  ```
+- [ ] Done
+
+---
+
+## Phase 9 — Dependency Management & CI Completeness
+
+Keeping the supply chain and test pipeline honest.
+
+---
+
+### 9.1 — Pin Dependencies to Minor Version Ranges
+- **Files:** `requirements.txt`, `requirements-prod.txt`
+- **Problem:** All dependencies use open-ended `>=` ranges (e.g. `fastapi>=0.104.0`). A breaking change in any library's next minor/major release will auto-apply on the next fresh Docker build with no warning.
+- **Approach:** Pin to known-good minor ranges:
+  ```
+  fastapi>=0.104.0,<0.116.0
+  uvicorn[standard]>=0.24.0,<0.35.0
+  pydantic>=2.4.0,<3.0.0
+  slowapi>=0.1.9,<0.2.0
+  ```
+  Add a comment: `# Bump upper bound after testing with new major/minor`. Consider adding `pip-compile` to generate a lockfile (`requirements-lock.txt`) for fully reproducible builds.
+- [ ] Done
+
+---
+
+### 9.2 — Docker Image Build + Security Scan in CI
+- **File:** `.github/workflows/ci.yml`
+- **Problem:** The CI pipeline never builds the Docker image. A broken Dockerfile would only be discovered when cutting a release. No container vulnerability scanning exists.
+- **Approach:** Add a job after unit tests:
+  ```yaml
+  docker-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t boxarr:ci .
+      - name: Scan with Trivy
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: boxarr:ci
+          severity: HIGH,CRITICAL
+          exit-code: 1
+  ```
+- [ ] Done
+
+---
+
+### 9.3 — Enforce Minimum Test Coverage
+- **File:** `.github/workflows/ci.yml`
+- **Problem:** `pytest --cov` runs and reports, but there is no minimum threshold. Coverage can silently drop to 0% and CI stays green.
+- **Approach:**
+  ```yaml
+  - name: Run Tests
+    run: pytest -v --cov=src --cov-report=term-missing --cov-fail-under=60
+  ```
+  Start at 60% as a baseline and ratchet up as tests are added. Add `--cov-report=xml` and upload to Codecov for trend tracking.
+- [ ] Done
+
+---
+
+### 9.4 — Weekly Dependency CVE Scan (Scheduled Workflow)
+- **File:** `.github/workflows/` (new file: `security-scan.yml`)
+- **Problem:** Dependencies are only scanned on push/PR. A CVE published on a Wednesday won't be detected until the next code change — which could be weeks later.
+- **Approach:**
+  ```yaml
+  name: Weekly Security Scan
+  on:
+    schedule:
+      - cron: '0 9 * * 1'  # Every Monday at 9am UTC
+  jobs:
+    scan:
+      runs-on: ubuntu-latest
+      steps:
+        - uses: actions/checkout@v4
+        - run: pip install safety && safety check -r requirements-prod.txt
+  ```
+- [ ] Done
+
+---
+
+### 9.5 — Replace Placeholder Integration Tests
+- **File:** `tests/integration/`
+- **Problem:** Integration tests are a single placeholder file with `@pytest.mark.skipif(True, ...)`. The matcher, scheduler, and Radarr client have zero integration-level coverage. The entire happy path (fetch → parse → match → generate JSON) is untested end-to-end.
+- **Approach:**
+  1. Use `pytest-vcr` (or `respx` for httpx) to record/replay real HTTP interactions.
+  2. Add `test_matcher_integration.py`: feed real-shape box office data through the full match pipeline against a fixture Radarr library.
+  3. Add `test_scheduler_integration.py`: call `scheduler.update_box_office()` with mocked HTTP; assert JSON file written correctly.
+  4. Add `conftest.py` fixtures: `mock_radarr_service`, `sample_box_office_movies`, `sample_radarr_library`.
+- [ ] Done
+
+---
+
+## Phase 10 — Frontend Code Quality
+
+Low-risk cleanup that reduces maintenance burden and improves accessibility.
+
+---
+
+### 10.1 — Remove Duplicate Modal Functions from app.js
+- **File:** `src/web/static/js/app.js`
+- **Problem:** `app.js` contains a full duplicate implementation of `showHistoricalUpdate`, `closeHistoricalUpdate`, `updateCurrentWeek`, `updateHistoricalWeek`, `showHistoricalWeekModal`, `closeHistoricalWeekModal`, and `fetchHistoricalWeek` — all at lines ~479–799. These shadow the versions in `dashboard.js` via DOMContentLoaded timing but contain divergent logic, making it impossible to predict which implementation runs in which scenario.
+- **Approach:** Remove the entire "Dashboard Functions" block from `app.js` (lines ~475–799). `dashboard.js` already owns those functions and loads after `app.js`. If any function is legitimately shared, move it to a `shared.js` or add it to the `ApiClient` object.
+- [ ] Done
+
+---
+
+### 10.2 — CSS: Dark Mode Inputs, Z-Index Scale, Focus-Visible
+- **File:** `src/web/static/css/style.css`
+- **Problem (3 in 1):**
+  1. Form inputs have no dark mode override — they render with browser-default light backgrounds in dark theme, creating jarring contrast breaks.
+  2. Modal/overlay/tooltip z-index values are hardcoded in multiple places without a documented scale.
+  3. Buttons and links lack `:focus-visible` outlines, failing WCAG 2.1 success criterion 2.4.7.
+- **Approach:**
+  ```css
+  /* Dark mode inputs */
+  [data-theme="dark"] input,
+  [data-theme="dark"] select,
+  [data-theme="dark"] textarea {
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    border-color: var(--border-color);
+  }
+
+  /* Z-index scale */
+  :root {
+    --z-dropdown: 100;
+    --z-sticky: 200;
+    --z-overlay: 900;
+    --z-modal: 1000;
+    --z-toast: 10000;
+  }
+
+  /* Focus-visible for keyboard nav */
+  :focus-visible {
+    outline: 2px solid var(--primary-color);
+    outline-offset: 2px;
+  }
+  ```
+- [ ] Done
+
+---
+
+### 10.3 — Restore Focus After Modal Close
+- **File:** `src/web/static/js/app.js`
+- **Problem:** The focus trap (MutationObserver in app.js) moves focus into the modal on open but the `releaseFocus()` function only returns focus to `prevFocused` if it was set. If a modal is opened programmatically (not via button click), `prevFocused` is null and focus jumps to `<body>` on close — disorienting for keyboard users.
+- **Approach:** Before opening any modal, store the trigger element explicitly:
+  ```js
+  function openModal(modalEl, triggerEl) {
+      modalEl._trigger = triggerEl || document.activeElement;
+      modalEl.classList.add('show');
+  }
+  // In releaseFocus:
+  const trigger = watchedModal?._trigger;
+  if (trigger?.focus) trigger.focus();
+  ```
+- [ ] Done
+
+---
+
+### 10.4 — Extract dashboard.html Inline CSS to dashboard.css
+- **File:** `src/web/templates/dashboard.html`, new `src/web/static/css/dashboard.css`
+- **Problem:** `dashboard.html` contains ~660 lines of `<style>` in a `<style>` block at the top of the file. This CSS is re-sent on every page load (no separate cache), isn't fingerprinted for cache-busting, and can't be linted or minified by tooling.
+- **Approach:**
+  1. Move the entire `<style>` block to `src/web/static/css/dashboard.css`.
+  2. Link it in the template: `<link rel="stylesheet" href="/static/css/dashboard.css?v={{ asset_hashes.get('css/dashboard.css', '1') }}">`.
+  3. The asset fingerprinting added in 3.5 will handle cache-busting automatically.
+- [ ] Done
+
+---
+
+### 10.5 — Colorblind-Accessible Progress Log Entries
+- **File:** `src/web/static/js/dashboard.js`
+- **Problem:** `addToProgressLog()` distinguishes entry types (success/error/warning/info) purely by text color. Users with red-green colorblindness (deuteranopia, ~8% of males) cannot differentiate error and success entries.
+- **Approach:** Add a text prefix alongside the color:
+  ```js
+  const PREFIXES = { error: '✗ ', warning: '⚠ ', success: '✓ ', info: '' };
+  entry.textContent = `[${timestamp}] ${PREFIXES[type] || ''}${message}`;
+  ```
+- [ ] Done
+
+---
+
 ## Summary Checklist by Priority
 
-> Last updated: 2026-04-22 — v1.7.4 on `feature/phase3-performance`
+> Last updated: 2026-04-23 — v1.7.5 on `feature/final-fixes`
+
+### Completed (Phases 1–4 + Cross-cutting)
+- [x] 1.1 GZip middleware
+- [x] 1.2 Security headers
+- [x] 1.3 Interval memory leak
+- [x] 1.4 External link rel attributes
+- [x] 1.5 Touch targets 44px
+- [x] 1.6 Cache-Control headers
+- [x] 2.1 Extract dashboard.js
+- [x] 2.2 ApiClient class
+- [x] 2.3 Remove setup.html inline styles
+- [x] 2.4 Search debounce (300ms form auto-submit)
+- [x] 2.5 CSS variable aliases
+- [x] 3.1 asyncio.to_thread() on all blocking route calls
+- [x] 3.2 TTL cache for Radarr profiles + root folders
+- [x] 3.3 Bulk Radarr fetch (already in place; confirmed)
+- [x] 3.4 Lazy tenure popovers
+- [x] 3.5 Asset fingerprinting
+- [x] 4.1 Skeleton loading states
+- [x] 4.2 Modal unification (classList.show, Escape, focus trap, ARIA)
+- [x] 4.3 ARIA + focus trap
+- [x] 4.4 clamp() typography
+- [x] 4.5 Toast queue
+- [x] 4.6 prefers-reduced-motion
+- [x] 4.7 GPU-accelerated animations
+- [x] O.1 Rate limiting (slowapi)
+- [x] O.2 Standardize error response shape
+- [x] O.3 Docker layer caching (already correct)
+- [x] O.4 theme-color meta tag
+
+### Phase 6 — Security Hardening
+- [ ] 6.1 Docker non-root user
+- [ ] 6.2 Stop silencing CI security scans (remove || true)
+- [ ] 6.3 XSS: html.escape() in web.py widget HTML
+- [x] 6.4 XSS: toast innerHTML → textContent (already correct in codebase)
+- [ ] 6.5 Validate localStorage theme value in theme-manager.js
+
+### Phase 7 — Reliability & Race Conditions
+- [ ] 7.1 Thread locks on module-level caches (radarr.py, config.py)
+- [ ] 7.2 Remaining blocking call in async: config.py save test_connection
+- [ ] 7.3 Disable buttons during in-flight requests (double-submit prevention)
+- [ ] 7.4 AbortController + fetch timeout in ApiClient
+- [ ] 7.5 Clear polling intervals on page unload
+- [ ] 7.6 Clamp page/TMDB ID input bounds in routes
+
+### Phase 8 — Infrastructure & Observability
+- [ ] 8.1 docker-compose logging driver + resource limits
+- [ ] 8.2 Graceful shutdown timeout in main.py
+- [ ] 8.3 Secrets scrubbing log filter
+- [ ] 8.4 Validate cron expression at config load time
+
+### Phase 9 — Dependency & CI Completeness
+- [ ] 9.1 Pin deps to minor version ranges
+- [ ] 9.2 Docker build + Trivy scan in CI
+- [ ] 9.3 Coverage enforcement (--cov-fail-under)
+- [ ] 9.4 Weekly CVE scan (scheduled workflow)
+- [ ] 9.5 Replace placeholder integration tests
+
+### Phase 10 — Frontend Code Quality
+- [ ] 10.1 Remove duplicate dashboard functions from app.js
+- [ ] 10.2 CSS: dark mode inputs, z-index scale, focus-visible
+- [ ] 10.3 Restore focus to trigger element after modal close
+- [ ] 10.4 Extract dashboard.html inline CSS to dashboard.css
+- [ ] 10.5 Colorblind-accessible progress log (text prefix + color)
+
+### Phase 5 — Big-Swing Features (parked, do later)
+- [ ] 5.1 Movie detail slide-over panel
+- [ ] 5.2 Bulk action toolbar
+- [ ] 5.3 Statistics & analytics dashboard
+- [ ] 5.4 Activity / audit log
+- [ ] 5.5 Keyboard shortcuts + help overlay
 
 ### Must-do before Phase 5 work begins
 - [x] 1.1 GZip middleware

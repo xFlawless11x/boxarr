@@ -13,10 +13,10 @@ class ThemeManager {
         // Get initial theme and apply it
         const theme = this.getEffectiveTheme();
         this.applyTheme(theme);
-        
+
         // Listen for system theme changes when in auto mode
         this.mediaQuery.addEventListener('change', (e) => {
-            const stored = localStorage.getItem(this.STORAGE_KEY);
+            const stored = this._storageGet();
             if (stored === 'auto' || !stored) {
                 const serverDefault = document.documentElement.dataset.serverTheme;
                 if (serverDefault === 'auto' || !stored) {
@@ -26,12 +26,27 @@ class ThemeManager {
         });
     }
 
+    // localStorage helpers — private browsing environments throw SecurityError
+    _storageGet() {
+        try { return localStorage.getItem(this.STORAGE_KEY); } catch { return null; }
+    }
+
+    _storageSet(value) {
+        try { localStorage.setItem(this.STORAGE_KEY, value); } catch { /* ignore */ }
+    }
+
+    _storageRemove() {
+        try { localStorage.removeItem(this.STORAGE_KEY); } catch { /* ignore */ }
+    }
+
     /**
      * Get the effective theme based on user preference, server default, and system preference
      */
     getEffectiveTheme() {
+        const VALID = ['light', 'dark', 'auto'];
         // 1. Check localStorage for user override
-        const stored = localStorage.getItem(this.STORAGE_KEY);
+        const raw = this._storageGet();
+        const stored = VALID.includes(raw) ? raw : null;
         
         // 2. If user selected a specific theme (light/dark), use it
         if (stored === 'light' || stored === 'dark') {
@@ -84,7 +99,7 @@ class ThemeManager {
     setTheme(preference) {
         // Store preference (light/dark/auto)
         if (preference === 'light' || preference === 'dark' || preference === 'auto') {
-            localStorage.setItem(this.STORAGE_KEY, preference);
+            this._storageSet(preference);
             
             // Determine effective theme
             let effectiveTheme;
@@ -103,7 +118,9 @@ class ThemeManager {
      * Get current preference (what's stored, not what's applied)
      */
     getPreference() {
-        return localStorage.getItem(this.STORAGE_KEY) || 'auto';
+        const VALID = ['light', 'dark', 'auto'];
+        const raw = this._storageGet();
+        return VALID.includes(raw) ? raw : 'auto';
     }
 
     /**
@@ -125,7 +142,7 @@ class ThemeManager {
      * Clear user preference and revert to server default
      */
     clearPreference() {
-        localStorage.removeItem(this.STORAGE_KEY);
+        this._storageRemove();
         const theme = this.getEffectiveTheme();
         this.applyTheme(theme);
     }

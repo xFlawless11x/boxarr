@@ -18,8 +18,12 @@ RUN pip install --no-cache-dir -r requirements-prod.txt
 COPY src/ /app/src/
 COPY config/default.yaml /app/config/
 
-# Create config directory
-RUN mkdir -p /config
+# Create non-root user and set up directories
+RUN groupadd -r boxarr && useradd -r -g boxarr -d /app -s /sbin/nologin boxarr \
+    && mkdir -p /config \
+    && chown -R boxarr:boxarr /app /config
+
+USER boxarr
 
 # Environment variables (optional - can be configured via UI)
 ENV PYTHONUNBUFFERED=1 \

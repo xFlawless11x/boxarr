@@ -1,5 +1,6 @@
 """Web UI routes."""
 
+import html
 import json
 from datetime import datetime
 from pathlib import Path
@@ -727,7 +728,7 @@ async def get_widget(request: Request):
         <div class="boxarr-widget">
             <h3>Box Office Week {widget_data.current_week}, {widget_data.current_year}</h3>
             <ol>
-                {"".join(f'<li>{m["title"]}</li>' for m in widget_data.movies[:5])}
+                {"".join(f'<li>{html.escape(m["title"] or "")}</li>' for m in widget_data.movies[:5])}
             </ol>
             <a href="{full_url}">View Full List</a>
         </div>
