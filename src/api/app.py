@@ -76,7 +76,7 @@ def create_app(scheduler: Optional[BoxarrScheduler] = None) -> FastAPI:
 
     # Attach rate limiter
     app.state.limiter = limiter
-    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type]
 
     # Add ProxyHeadersMiddleware to handle reverse proxy headers
     # Note: Remove trusted_hosts parameter for better security
@@ -128,7 +128,9 @@ def create_app(scheduler: Optional[BoxarrScheduler] = None) -> FastAPI:
         if static_dir.exists():
             for f in static_dir.rglob("*"):
                 if f.is_file():
-                    h = hashlib.md5(f.read_bytes()).hexdigest()[:8]
+                    h = hashlib.md5(f.read_bytes(), usedforsecurity=False).hexdigest()[
+                        :8
+                    ]
                     hashes[str(f.relative_to(static_dir)).replace("\\", "/")] = h
         app.state.asset_hashes = hashes
         logger.info(f"Asset fingerprints computed ({len(hashes)} files)")
