@@ -64,21 +64,26 @@ def setup_logging(
     console_handler.setLevel(getattr(logging, log_level.upper()))
     root_logger.addHandler(console_handler)
 
-    # File handler with rotation
-    file_handler = RotatingFileHandler(
-        log_dir / "boxarr.log", maxBytes=10 * 1024 * 1024, backupCount=5  # 10MB
-    )
-    file_handler.setFormatter(formatter)
-    file_handler.setLevel(logging.DEBUG)  # Always log DEBUG to file
-    root_logger.addHandler(file_handler)
+    # File handler with rotation — may fail if the volume is owned by root
+    # (e.g. first Docker start before the entrypoint chowns /config).
+    # Fall back gracefully to stdout-only rather than crashing at startup.
+    try:
+        log_dir.mkdir(parents=True, exist_ok=True)
+        file_handler = RotatingFileHandler(
+            log_dir / "boxarr.log", maxBytes=10 * 1024 * 1024, backupCount=5  # 10MB
+        )
+        file_handler.setFormatter(formatter)
+        file_handler.setLevel(logging.DEBUG)
+        root_logger.addHandler(file_handler)
 
-    # Error file handler
-    error_handler = RotatingFileHandler(
-        log_dir / "error.log", maxBytes=10 * 1024 * 1024, backupCount=3  # 10MB
-    )
-    error_handler.setFormatter(formatter)
-    error_handler.setLevel(logging.ERROR)
-    root_logger.addHandler(error_handler)
+        error_handler = RotatingFileHandler(
+            log_dir / "error.log", maxBytes=10 * 1024 * 1024, backupCount=3  # 10MB
+        )
+        error_handler.setFormatter(formatter)
+        error_handler.setLevel(logging.ERROR)
+        root_logger.addHandler(error_handler)
+    except (PermissionError, OSError) as e:
+        logging.warning("Cannot create log files: %s. Logging to stdout only.", e)
 
     # Reduce noise from third-party libraries
     logging.getLogger("httpx").setLevel(logging.WARNING)
