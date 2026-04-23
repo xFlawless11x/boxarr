@@ -2,18 +2,34 @@
 
 import logging
 import os
+import re
 import sys
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Optional
 
-# Paths that produce high-frequency, low-value log noise when hit by automated
-# probes (Docker/orchestrator health checks, uptime monitors, load balancer
-# pings).  Uvicorn logs every HTTP request by default; without this filter the
-# access log fills with hundreds of identical health-check lines per hour,
-# drowning out meaningful events — the same reason Sonarr, Radarr, and other
-# *arr apps suppress health-endpoint access from their own log output.
 _HEALTHCHECK_PATHS = {"/api/health"}
+
+_SCRUB_PATTERNS = [
+    (re.compile(r"(api[_-]?key[=:/ ]+)\S+", re.I), r"\1***"),
+    (re.compile(r"(Authorization:\s*)\S+", re.I), r"\1***"),
+    (re.compile(r"(apikey=)\S+", re.I), r"\1***"),
+]
+
+
+class _ScrubSecretsFilter(logging.Filter):
+    """Redact API keys and auth tokens from log records before they are written."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            msg = record.getMessage()
+            for pattern, repl in _SCRUB_PATTERNS:
+                msg = pattern.sub(repl, msg)
+            record.msg = msg
+            record.args = ()
+        except Exception:
+            pass
+        return True
 
 
 class _HealthCheckFilter(logging.Filter):
@@ -58,10 +74,13 @@ def setup_logging(
     )
     formatter = logging.Formatter(log_format)
 
+    scrub_filter = _ScrubSecretsFilter()
+
     # Console handler
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setFormatter(formatter)
     console_handler.setLevel(getattr(logging, log_level.upper()))
+    console_handler.addFilter(scrub_filter)
     root_logger.addHandler(console_handler)
 
     # File handler with rotation — may fail if the volume is owned by root
@@ -74,6 +93,7 @@ def setup_logging(
         )
         file_handler.setFormatter(formatter)
         file_handler.setLevel(logging.DEBUG)
+        file_handler.addFilter(scrub_filter)
         root_logger.addHandler(file_handler)
 
         error_handler = RotatingFileHandler(
@@ -81,6 +101,7 @@ def setup_logging(
         )
         error_handler.setFormatter(formatter)
         error_handler.setLevel(logging.ERROR)
+        error_handler.addFilter(scrub_filter)
         root_logger.addHandler(error_handler)
     except (PermissionError, OSError) as e:
         logging.warning("Cannot create log files: %s. Logging to stdout only.", e)

@@ -86,6 +86,7 @@ class BoxarrApplication:
             port=settings.boxarr_port,
             log_level=settings.log_level.lower(),
             access_log=True,
+            timeout_graceful_shutdown=30,
         )
 
         server = uvicorn.Server(config)

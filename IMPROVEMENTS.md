@@ -1080,7 +1080,7 @@ Operational concerns: logging, resource limits, graceful shutdown, secrets hygie
 
 ---
 
-### 8.1 — Docker Compose: Log Rotation and Resource Limits
+### ✅ 8.1 — Docker Compose: Log Rotation and Resource Limits
 - **File:** `docker-compose.yml`
 - **Problem:** No logging driver is configured, so container logs write unbounded JSON to the Docker daemon's default location and can fill disk. No CPU/memory limits mean a runaway scrape loop could starve other containers.
 - **Approach:**
@@ -1101,11 +1101,11 @@ Operational concerns: logging, resource limits, graceful shutdown, secrets hygie
             cpus: '0.25'
             memory: 128M
   ```
-- [ ] Done
+- [x] Done
 
 ---
 
-### 8.2 — Graceful Shutdown Timeout
+### ✅ 8.2 — Graceful Shutdown Timeout
 - **File:** `src/main.py`
 - **Problem:** Uvicorn's shutdown has no explicit timeout. A slow Radarr API call in-flight during SIGTERM can hang the process indefinitely, causing Docker to send SIGKILL and potentially corrupting in-progress JSON file writes.
 - **Approach:**
@@ -1118,11 +1118,11 @@ Operational concerns: logging, resource limits, graceful shutdown, secrets hygie
   )
   ```
   Also wrap the scheduler's `stop()` call in a timeout: `scheduler.stop(wait=True)` with a thread join timeout.
-- [ ] Done
+- [x] Done
 
 ---
 
-### 8.3 — Scrub Secrets from Log Output
+### ✅ 8.3 — Scrub Secrets from Log Output
 - **File:** `src/utils/logger.py`
 - **Problem:** Exception tracebacks and error messages can include the Radarr API key (it appears in URL construction errors) or the full Radarr URL with embedded credentials. These land in plaintext log files.
 - **Approach:** Add a custom `logging.Filter`:
@@ -1143,11 +1143,11 @@ Operational concerns: logging, resource limits, graceful shutdown, secrets hygie
           return True
   ```
   Attach to both the file handler and the console handler.
-- [ ] Done
+- [x] Done
 
 ---
 
-### 8.4 — Validate Cron Expression at Config Load Time
+### ✅ 8.4 — Validate Cron Expression at Config Load Time
 - **File:** `src/utils/config.py`
 - **Problem:** `boxarr_scheduler_cron` accepts any string. An invalid expression like `"not a cron"` is stored successfully and only fails when APScheduler tries to create the job at startup — producing a cryptic error far from the original bad input.
 - **Approach:**
@@ -1164,7 +1164,7 @@ Operational concerns: logging, resource limits, graceful shutdown, secrets hygie
           raise ValueError(f"Invalid cron expression '{v}': {e}") from e
       return v
   ```
-- [ ] Done
+- [x] Done
 
 ---
 
@@ -1395,10 +1395,10 @@ Low-risk cleanup that reduces maintenance burden and improves accessibility.
 - [x] 7.6 Clamp page/TMDB ID input bounds in routes
 
 ### Phase 8 — Infrastructure & Observability
-- [ ] 8.1 docker-compose logging driver + resource limits
-- [ ] 8.2 Graceful shutdown timeout in main.py
-- [ ] 8.3 Secrets scrubbing log filter
-- [ ] 8.4 Validate cron expression at config load time
+- [x] 8.1 docker-compose logging driver + resource limits
+- [x] 8.2 Graceful shutdown timeout (timeout_graceful_shutdown=30 in main.py)
+- [x] 8.3 Secrets scrubbing log filter (_ScrubSecretsFilter on all handlers)
+- [x] 8.4 Validate cron expression at config load time (@validator on boxarr_scheduler_cron)
 
 ### Phase 9 — Dependency & CI Completeness
 - [ ] 9.1 Pin deps to minor version ranges
