@@ -736,16 +736,17 @@ async def get_widget(request: Request):
         full_url = str(request.base_url).rstrip("/") + "/"
 
         # Simple widget HTML
-        html = f"""
+        items = "".join(
+            f"<li>{html.escape(m['title'] or '')}</li>" for m in widget_data.movies[:5]
+        )
+        widget_html = f"""
         <div class="boxarr-widget">
             <h3>Box Office Week {widget_data.current_week}, {widget_data.current_year}</h3>
-            <ol>
-                {"".join(f'<li>{html.escape(m["title"] or "")}</li>' for m in widget_data.movies[:5])}
-            </ol>
+            <ol>{items}</ol>
             <a href="{full_url}">View Full List</a>
         </div>
         """
-        return HTMLResponse(content=html)
+        return HTMLResponse(content=widget_html)
     except Exception as e:
         logger.error(f"Error generating widget: {e}")
         return HTMLResponse(content="<div>Error loading widget</div>")

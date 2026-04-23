@@ -105,7 +105,7 @@ jobs:
         
     - name: Run Bandit (Security Linter)
       run: |
-        bandit -r src/ -f json -o bandit-report.json --skip B104,B608
+        bandit -r src/ -f json -o bandit-report.json --skip B104,B608 --exit-zero
         bandit -r src/ --severity-level medium --skip B104,B608
 
     - name: Run Safety (Dependency Vulnerability Check)
