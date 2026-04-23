@@ -248,6 +248,8 @@ async def refresh_stored_status_progress():
 @router.get("/{tmdb_id}/weeks")
 async def get_movie_weeks(tmdb_id: int):
     """Return all weekly page slugs that contain this movie."""
+    if tmdb_id <= 0:
+        raise HTTPException(status_code=400, detail="Invalid TMDB ID")
     try:
         weekly_pages_dir = Path(settings.boxarr_data_directory) / "weekly_pages"
         if not weekly_pages_dir.exists():

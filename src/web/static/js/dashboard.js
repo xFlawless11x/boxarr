@@ -11,6 +11,7 @@ class RangeProcessor {
         this.results = [];
         this.cancelled = false;
         this.existingWeeks = new Set();
+        this.isRunning = false;
     }
 
     calculateWeeks(startYear, startWeek, endYear, endWeek) {
@@ -52,6 +53,8 @@ class RangeProcessor {
     }
 
     async processRange(startYear, startWeek, endYear, endWeek) {
+        if (this.isRunning) return;
+        this.isRunning = true;
         this.weeks = this.calculateWeeks(startYear, startWeek, endYear, endWeek);
         this.results = [];
         this.cancelled = false;
@@ -87,6 +90,7 @@ class RangeProcessor {
             }
         }
 
+        this.isRunning = false;
         this.showSummary();
     }
 

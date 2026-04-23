@@ -37,14 +37,24 @@ class ApiClient {
     }
 
     async _request(method, endpoint, body, signal) {
-        const opts = { method, headers: { 'Content-Type': 'application/json' }, signal };
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 30_000);
+        if (signal) signal.addEventListener('abort', () => controller.abort());
+        const opts = { method, headers: { 'Content-Type': 'application/json' }, signal: controller.signal };
         if (body !== undefined) opts.body = JSON.stringify(body);
-        const res = await fetch(this._url(endpoint), opts);
-        if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            throw new Error(err.detail || err.message || `HTTP ${res.status}`);
+        try {
+            const res = await fetch(this._url(endpoint), opts);
+            clearTimeout(timer);
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.detail || err.message || `HTTP ${res.status}`);
+            }
+            return res.json();
+        } catch (e) {
+            clearTimeout(timer);
+            if (e.name === 'AbortError') throw new Error('Request timed out after 30s');
+            throw e;
         }
-        return res.json();
     }
 
     get(endpoint, signal)        { return this._request('GET',    endpoint, undefined, signal); }
@@ -350,6 +360,18 @@ function reloadScheduler() {
     let statusCheckInterval = null;
     let isModalOpen = false;
     let connectionTested = false;
+
+    // Disable a button for the duration of an async operation, restore on completion
+    function withInFlight(btn, asyncFn) {
+        if (!btn || btn.disabled) return;
+        btn.disabled = true;
+        const original = btn.textContent;
+        btn.textContent = 'Working…';
+        Promise.resolve(asyncFn()).finally(() => {
+            btn.disabled = false;
+            btn.textContent = original;
+        });
+    }
 
     // ==========================================
     // Core Functions
@@ -1437,7 +1459,10 @@ function reloadScheduler() {
         }
         
         showMessage('Saving configuration...', 'info');
-        
+
+        const saveBtn = document.getElementById('saveBtn');
+        if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving…'; }
+
         fetch(apiUrl('/config/save'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1451,10 +1476,12 @@ function reloadScheduler() {
                     window.location.href = makeUrl('/dashboard');
                 }, 1500);
             } else {
+                if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Save Configuration'; }
                 showMessage('Failed to save: ' + (data.error || 'Unknown error'), 'error');
             }
         })
         .catch(error => {
+            if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Save Configuration'; }
             showMessage('Error saving configuration: ' + error.message, 'error');
         });
     };
@@ -1724,8 +1751,8 @@ function reloadScheduler() {
         }());
     });
 
-    // Cleanup on page unload
-    window.addEventListener('beforeunload', function() {
+    // Cleanup on page unload (pagehide is reliable for bfcache-enabled browsers)
+    window.addEventListener('pagehide', function() {
         if (statusCheckInterval) {
             clearInterval(statusCheckInterval);
         }

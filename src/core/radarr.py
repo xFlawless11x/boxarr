@@ -1,5 +1,7 @@
 """Radarr API client for movie management."""
 
+import threading
+import time
 from dataclasses import dataclass, field
 from enum import Enum
 from inspect import signature
@@ -93,6 +95,7 @@ class RadarrMovie:
 _movies_cache: Dict[str, Any] = {"ts": 0.0, "data": []}
 _profiles_cache: Dict[str, Any] = {"ts": 0.0, "data": []}
 _root_folders_cache: Dict[str, Any] = {"ts": 0.0, "data": []}
+_cache_lock = threading.Lock()
 
 
 def get_all_movies_with_optional_cache_bypass(
@@ -251,23 +254,22 @@ class RadarrService:
         except Exception:
             ttl = 120
 
-        now = __import__("time").time()
-        if (
-            not ignore_cache
-            and _movies_cache["data"]
-            and (now - _movies_cache["ts"]) < ttl
-        ):
-            return cast(List[RadarrMovie], _movies_cache["data"])
+        now = time.time()
+        with _cache_lock:
+            if (
+                not ignore_cache
+                and _movies_cache["data"]
+                and (now - _movies_cache["ts"]) < ttl
+            ):
+                return cast(List[RadarrMovie], _movies_cache["data"])
 
         response = self._make_request("GET", "/api/v3/movie")
-        movies: List[RadarrMovie] = []
+        movies: List[RadarrMovie] = [self._parse_movie(m) for m in response.json()]
+        now = time.time()
 
-        for movie_data in response.json():
-            movie = self._parse_movie(movie_data)
-            movies.append(movie)
-
-        _movies_cache["data"] = movies
-        _movies_cache["ts"] = now
+        with _cache_lock:
+            _movies_cache["data"] = movies
+            _movies_cache["ts"] = now
         logger.info(f"Fetched {len(movies)} movies from Radarr")
         return movies
 
@@ -457,11 +459,9 @@ class RadarrService:
 
         logger.info(f"Added movie to Radarr: {added_movie.title}")
         # Invalidate library cache so new movie is visible immediately
-        try:
+        with _cache_lock:
             _movies_cache["ts"] = 0.0
             _movies_cache["data"] = []
-        except Exception:
-            pass
         return added_movie
 
     def update_movie(self, movie: RadarrMovie) -> RadarrMovie:
@@ -548,13 +548,14 @@ class RadarrService:
         except Exception:
             ttl = 120
 
-        now = __import__("time").time()
-        if (
-            not ignore_cache
-            and _profiles_cache["data"]
-            and (now - _profiles_cache["ts"]) < ttl
-        ):
-            return cast(List[QualityProfile], _profiles_cache["data"])
+        now = time.time()
+        with _cache_lock:
+            if (
+                not ignore_cache
+                and _profiles_cache["data"]
+                and (now - _profiles_cache["ts"]) < ttl
+            ):
+                return cast(List[QualityProfile], _profiles_cache["data"])
 
         response = self._make_request("GET", "/api/v3/qualityProfile")
         profiles: List[QualityProfile] = []
@@ -574,8 +575,10 @@ class RadarrService:
             }
             profiles.append(QualityProfile(**filtered_profile))
 
-        _profiles_cache["data"] = profiles
-        _profiles_cache["ts"] = now
+        now = time.time()
+        with _cache_lock:
+            _profiles_cache["data"] = profiles
+            _profiles_cache["ts"] = now
         self._quality_profiles = profiles
         return profiles
 
@@ -682,19 +685,22 @@ class RadarrService:
         except Exception:
             ttl = 120
 
-        now = __import__("time").time()
-        if (
-            not ignore_cache
-            and _root_folders_cache["data"]
-            and (now - _root_folders_cache["ts"]) < ttl
-        ):
-            return list(_root_folders_cache["data"])
+        now = time.time()
+        with _cache_lock:
+            if (
+                not ignore_cache
+                and _root_folders_cache["data"]
+                and (now - _root_folders_cache["ts"]) < ttl
+            ):
+                return list(_root_folders_cache["data"])
 
         response = self._make_request("GET", "/api/v3/rootFolder")
         result = response.json()
         folders = result if isinstance(result, list) else []
-        _root_folders_cache["data"] = folders
-        _root_folders_cache["ts"] = now
+        now = time.time()
+        with _cache_lock:
+            _root_folders_cache["data"] = folders
+            _root_folders_cache["ts"] = now
         return folders
 
     def get_root_folder_paths(self) -> List[str]:

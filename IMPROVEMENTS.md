@@ -1384,12 +1384,12 @@ Low-risk cleanup that reduces maintenance burden and improves accessibility.
 - [ ] 6.5 Validate localStorage theme value in theme-manager.js
 
 ### Phase 7 — Reliability & Race Conditions
-- [ ] 7.1 Thread locks on module-level caches (radarr.py, config.py)
-- [ ] 7.2 Remaining blocking call in async: config.py save test_connection
-- [ ] 7.3 Disable buttons during in-flight requests (double-submit prevention)
-- [ ] 7.4 AbortController + fetch timeout in ApiClient
-- [ ] 7.5 Clear polling intervals on page unload
-- [ ] 7.6 Clamp page/TMDB ID input bounds in routes
+- [x] 7.1 Thread locks on module-level caches (radarr.py, config.py)
+- [x] 7.2 Remaining blocking call in async: config.py save test_connection
+- [x] 7.3 Disable buttons during in-flight requests (double-submit prevention)
+- [x] 7.4 AbortController + fetch timeout in ApiClient
+- [x] 7.5 Clear polling intervals on page unload
+- [x] 7.6 Clamp page/TMDB ID input bounds in routes
 
 ### Phase 8 — Infrastructure & Observability
 - [ ] 8.1 docker-compose logging driver + resource limits

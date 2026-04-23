@@ -1,6 +1,7 @@
 """Configuration management for Boxarr using pydantic-settings."""
 
 import os
+import threading
 from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
@@ -516,11 +517,13 @@ class Settings(BaseSettings):
     def reload_from_file(cls, config_path: Path) -> None:
         """Reload settings from file by clearing the cache."""
         global _settings
-        _settings = None  # Clear cache to force reload
+        with _settings_lock:
+            _settings = None
 
 
 # Lazy-loaded settings to avoid import-time side effects
 _settings: Optional[Settings] = None
+_settings_lock = threading.Lock()
 
 
 def load_settings() -> Settings:
@@ -555,7 +558,9 @@ def get_settings() -> Settings:
     """Get settings instance (lazy-loaded to avoid import side effects)."""
     global _settings
     if _settings is None:
-        _settings = load_settings()
+        with _settings_lock:
+            if _settings is None:  # double-checked locking
+                _settings = load_settings()
     return _settings
 
 

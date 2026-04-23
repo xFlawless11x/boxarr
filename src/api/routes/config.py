@@ -181,7 +181,7 @@ async def save_configuration(request: Request, config: SaveConfigRequest):
             url=config.radarr_url, api_key=config.radarr_api_key
         )
 
-        if not test_service.test_connection():
+        if not await asyncio.to_thread(test_service.test_connection):
             return {
                 "success": False,
                 "message": "Cannot save: Radarr connection failed",

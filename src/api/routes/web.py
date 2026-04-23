@@ -173,8 +173,14 @@ async def movie_overview_page(request: Request):
         return RedirectResponse(url=f"{base}/setup")
 
     # Get query parameters for filtering
-    page = int(request.query_params.get("page", 1))
-    per_page = int(request.query_params.get("per_page", 50))
+    try:
+        page = max(1, int(request.query_params.get("page", 1)))
+    except (ValueError, TypeError):
+        page = 1
+    try:
+        per_page = int(request.query_params.get("per_page", 50))
+    except (ValueError, TypeError):
+        per_page = 50
     status_filter = request.query_params.get("status", "all")
     year_filter_str = request.query_params.get("year", None)
     search_query = request.query_params.get("search", "").strip().lower()
@@ -325,8 +331,14 @@ async def dashboard_page(request: Request):
         return RedirectResponse(url=f"{base}/setup")
 
     # Get query parameters for pagination and filtering
-    page = int(request.query_params.get("page", 1))
-    per_page = int(request.query_params.get("per_page", 10))
+    try:
+        page = max(1, int(request.query_params.get("page", 1)))
+    except (ValueError, TypeError):
+        page = 1
+    try:
+        per_page = int(request.query_params.get("per_page", 10))
+    except (ValueError, TypeError):
+        per_page = 10
     year_filter_str = request.query_params.get("year", None)
 
     # Validate per_page
