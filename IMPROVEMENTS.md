@@ -1174,7 +1174,7 @@ Keeping the supply chain and test pipeline honest.
 
 ---
 
-### 9.1 — Pin Dependencies to Minor Version Ranges
+### ⏭ 9.1 — Pin Dependencies to Minor Version Ranges (skipped)
 - **Files:** `requirements.txt`, `requirements-prod.txt`
 - **Problem:** All dependencies use open-ended `>=` ranges (e.g. `fastapi>=0.104.0`). A breaking change in any library's next minor/major release will auto-apply on the next fresh Docker build with no warning.
 - **Approach:** Pin to known-good minor ranges:
@@ -1185,11 +1185,11 @@ Keeping the supply chain and test pipeline honest.
   slowapi>=0.1.9,<0.2.0
   ```
   Add a comment: `# Bump upper bound after testing with new major/minor`. Consider adding `pip-compile` to generate a lockfile (`requirements-lock.txt`) for fully reproducible builds.
-- [ ] Done
+- [~] Skipped — not needed now
 
 ---
 
-### 9.2 — Docker Image Build + Security Scan in CI
+### ⏭ 9.2 — Docker Image Build + Security Scan in CI (skipped)
 - **File:** `.github/workflows/ci.yml`
 - **Problem:** The CI pipeline never builds the Docker image. A broken Dockerfile would only be discovered when cutting a release. No container vulnerability scanning exists.
 - **Approach:** Add a job after unit tests:
@@ -1207,11 +1207,11 @@ Keeping the supply chain and test pipeline honest.
           severity: HIGH,CRITICAL
           exit-code: 1
   ```
-- [ ] Done
+- [~] Skipped — not needed now
 
 ---
 
-### 9.3 — Enforce Minimum Test Coverage
+### ✅ 9.3 — Enforce Minimum Test Coverage
 - **File:** `.github/workflows/ci.yml`
 - **Problem:** `pytest --cov` runs and reports, but there is no minimum threshold. Coverage can silently drop to 0% and CI stays green.
 - **Approach:**
@@ -1220,11 +1220,12 @@ Keeping the supply chain and test pipeline honest.
     run: pytest -v --cov=src --cov-report=term-missing --cov-fail-under=60
   ```
   Start at 60% as a baseline and ratchet up as tests are added. Add `--cov-report=xml` and upload to Codecov for trend tracking.
-- [ ] Done
+  **Note:** Set to 50% (not 60%) — current coverage is ~52%; routes need TestClient tests to close the gap. Ratchet up incrementally.
+- [x] Done
 
 ---
 
-### 9.4 — Weekly Dependency CVE Scan (Scheduled Workflow)
+### ⏭ 9.4 — Weekly Dependency CVE Scan (skipped)
 - **File:** `.github/workflows/` (new file: `security-scan.yml`)
 - **Problem:** Dependencies are only scanned on push/PR. A CVE published on a Wednesday won't be detected until the next code change — which could be weeks later.
 - **Approach:**
@@ -1240,11 +1241,11 @@ Keeping the supply chain and test pipeline honest.
         - uses: actions/checkout@v4
         - run: pip install safety && safety check -r requirements-prod.txt
   ```
-- [ ] Done
+- [~] Skipped — not needed now
 
 ---
 
-### 9.5 — Replace Placeholder Integration Tests
+### ✅ 9.5 — Replace Placeholder Integration Tests
 - **File:** `tests/integration/`
 - **Problem:** Integration tests are a single placeholder file with `@pytest.mark.skipif(True, ...)`. The matcher, scheduler, and Radarr client have zero integration-level coverage. The entire happy path (fetch → parse → match → generate JSON) is untested end-to-end.
 - **Approach:**
@@ -1252,7 +1253,8 @@ Keeping the supply chain and test pipeline honest.
   2. Add `test_matcher_integration.py`: feed real-shape box office data through the full match pipeline against a fixture Radarr library.
   3. Add `test_scheduler_integration.py`: call `scheduler.update_box_office()` with mocked HTTP; assert JSON file written correctly.
   4. Add `conftest.py` fixtures: `mock_radarr_service`, `sample_box_office_movies`, `sample_radarr_library`.
-- [ ] Done
+  **Implemented:** `test_matcher_integration.py` (13 tests covering full batch pipeline, title normalisation, edge cases) and `test_scheduler_integration.py` (8 tests covering JSON file output, result structure, idempotency, empty-library path).
+- [x] Done
 
 ---
 
@@ -1401,11 +1403,11 @@ Low-risk cleanup that reduces maintenance burden and improves accessibility.
 - [x] 8.4 Validate cron expression at config load time (@validator on boxarr_scheduler_cron)
 
 ### Phase 9 — Dependency & CI Completeness
-- [ ] 9.1 Pin deps to minor version ranges
-- [ ] 9.2 Docker build + Trivy scan in CI
-- [ ] 9.3 Coverage enforcement (--cov-fail-under)
-- [ ] 9.4 Weekly CVE scan (scheduled workflow)
-- [ ] 9.5 Replace placeholder integration tests
+- [~] 9.1 Pin deps to minor version ranges — skipped (not needed now)
+- [~] 9.2 Docker build + Trivy scan in CI — skipped (not needed now)
+- [x] 9.3 Coverage enforcement (--cov-fail-under=50; current coverage ~52%, ratchet up as routes gain tests)
+- [~] 9.4 Weekly CVE scan (scheduled workflow) — skipped (not needed now)
+- [x] 9.5 Integration tests: test_matcher_integration.py (13 tests) + test_scheduler_integration.py (8 tests)
 
 ### Phase 10 — Frontend Code Quality
 - [ ] 10.1 Remove duplicate dashboard functions from app.js
