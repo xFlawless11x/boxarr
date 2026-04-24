@@ -23,7 +23,6 @@ from src.core.radarr import RadarrMovie
 from src.core.scheduler import BoxarrScheduler
 from src.utils.config import Settings
 
-
 # ---------------------------------------------------------------------------
 # Fake service helpers
 # ---------------------------------------------------------------------------
@@ -45,7 +44,9 @@ RADARR_LIBRARY = [
     _radarr_movie(2, "Top Gun: Maverick", 2022, has_file=True),
     _radarr_movie(3, "Spider-Man: No Way Home", 2021, has_file=True),
     _radarr_movie(4, "The Batman", 2022, has_file=False),
-    _radarr_movie(5, "Doctor Strange in the Multiverse of Madness", 2022, has_file=False),
+    _radarr_movie(
+        5, "Doctor Strange in the Multiverse of Madness", 2022, has_file=False
+    ),
 ]
 
 BOX_OFFICE = [
@@ -63,6 +64,7 @@ class _FakeBoxOfficeService:
 
     def get_weekend_dates(self):
         from datetime import datetime
+
         friday = datetime(2022, 12, 16)
         sunday = datetime(2022, 12, 18)
         return friday, sunday, 2022, 50
@@ -112,13 +114,19 @@ def patched_scheduler(configured_tmp, monkeypatch):
     def fake_get_all_movies(radarr_service, ignore_cache=False):
         return RADARR_LIBRARY
 
-    monkeypatch.setattr(sched_module, "get_all_movies_with_optional_cache_bypass", fake_get_all_movies)
+    monkeypatch.setattr(
+        sched_module, "get_all_movies_with_optional_cache_bypass", fake_get_all_movies
+    )
 
     # Replace refresh_weekly_data_from_radarr — not under test here
     monkeypatch.setattr(
         sched_module,
         "refresh_weekly_data_from_radarr",
-        lambda **kwargs: {"weeks_updated": 0, "movies_refreshed": 0, "movies_linked": 0},
+        lambda **kwargs: {
+            "weeks_updated": 0,
+            "movies_refreshed": 0,
+            "movies_linked": 0,
+        },
     )
 
     scheduler = BoxarrScheduler(
@@ -167,7 +175,9 @@ class TestSchedulerUpdatePipeline:
         scheduler, _ = patched_scheduler
         result = asyncio.run(scheduler.update_box_office(year=2022, week=50))
 
-        assert result["matched_count"] + result["unmatched_count"] == result["total_count"]
+        assert (
+            result["matched_count"] + result["unmatched_count"] == result["total_count"]
+        )
 
     def test_known_library_movies_are_matched(self, patched_scheduler):
         """At least 3 of the 4 library movies in the box office list must match."""

@@ -13,7 +13,6 @@ from src.core.matcher import MovieMatcher
 from src.core.models import MovieStatus
 from src.core.radarr import RadarrMovie
 
-
 # ---------------------------------------------------------------------------
 # Shared fixtures
 # ---------------------------------------------------------------------------
@@ -97,7 +96,9 @@ class TestMatcherFullPipeline:
 
     def test_all_matched_have_radarr_movie(self, matcher):
         """Every matched result must carry a non-None radarr_movie."""
-        box_office = [BoxOfficeMovie(rank=i + 1, title=m.title) for i, m in enumerate(LIBRARY[:5])]
+        box_office = [
+            BoxOfficeMovie(rank=i + 1, title=m.title) for i, m in enumerate(LIBRARY[:5])
+        ]
         results = matcher.match_batch(box_office, LIBRARY)
 
         for r in results:
@@ -174,9 +175,7 @@ class TestMatcherPipelineEdgeCases:
     def test_empty_library(self):
         m = MovieMatcher()
         m.build_movie_index([])
-        results = m.match_batch(
-            [BoxOfficeMovie(rank=1, title="Inception")], []
-        )
+        results = m.match_batch([BoxOfficeMovie(rank=1, title="Inception")], [])
         assert len(results) == 1
         assert not results[0].is_matched
 
