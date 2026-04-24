@@ -59,7 +59,7 @@ def get_version() -> str:
 
     # Fallback version for when git is not available (e.g., in Docker)
     # This should be updated when creating a new release
-    return "1.8.0"
+    return "1.8.1"
 
 
 # Cache the version at import time

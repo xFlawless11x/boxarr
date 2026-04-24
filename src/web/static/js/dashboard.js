@@ -578,7 +578,8 @@ function addToProgressLog(message, type = 'info') {
     const log = document.getElementById('progressLog');
     const entry = document.createElement('div');
     const timestamp = new Date().toLocaleTimeString();
-    entry.textContent = `[${timestamp}] ${message}`;
+    const PREFIX = { error: '✗ ', warning: '⚠ ', success: '✓ ', info: '' };
+    entry.textContent = `[${timestamp}] ${PREFIX[type] || ''}${message}`;
 
     if (type === 'error') entry.style.color = 'var(--error-color)';
     else if (type === 'warning') entry.style.color = 'var(--warning-color)';

@@ -1410,11 +1410,11 @@ Low-risk cleanup that reduces maintenance burden and improves accessibility.
 - [x] 9.5 Integration tests: test_matcher_integration.py (13 tests) + test_scheduler_integration.py (8 tests)
 
 ### Phase 10 — Frontend Code Quality
-- [ ] 10.1 Remove duplicate dashboard functions from app.js
-- [ ] 10.2 CSS: dark mode inputs, z-index scale, focus-visible
-- [ ] 10.3 Restore focus to trigger element after modal close
-- [ ] 10.4 Extract dashboard.html inline CSS to dashboard.css
-- [ ] 10.5 Colorblind-accessible progress log (text prefix + color)
+- [x] 10.1 Remove duplicate dashboard functions from app.js (325 lines removed)
+- [x] 10.2 CSS: dark mode inputs, z-index scale vars, focus-visible outline
+- [x] 10.3 Restore focus to trigger element after modal close
+- [x] 10.4 Extract dashboard.html inline CSS to dashboard.css (660 lines moved)
+- [x] 10.5 Colorblind-accessible progress log (✓/✗/⚠ prefix + color)
 
 ### Phase 5 — Big-Swing Features (parked, do later)
 - [ ] 5.1 Movie detail slide-over panel
