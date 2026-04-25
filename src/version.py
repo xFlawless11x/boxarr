@@ -57,9 +57,13 @@ def get_version() -> str:
         # Git not available or not in a git repo
         pass
 
-    # Fallback version for when git is not available (e.g., in Docker)
-    # This should be updated when creating a new release
-    return "1.8.1"
+    # Fallback: read version baked in at Docker build time via APP_VERSION build arg.
+    # Falls back to "dev" if not set (e.g. local runs without git).
+    import os
+
+    baked = os.environ.get("APP_VERSION", "dev")
+    # Strip leading 'v' in case the tag format (e.g. v1.8.0) was passed directly
+    return baked.lstrip("v") if baked else "dev"
 
 
 # Cache the version at import time
