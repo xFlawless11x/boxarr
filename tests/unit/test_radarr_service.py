@@ -151,8 +151,9 @@ class TestGetAllMovies:
         assert movies[0].title == "Inception"
 
     def test_uses_cache(self):
-        import src.core.radarr as radarr_module
         import time
+
+        import src.core.radarr as radarr_module
 
         fake_movie = MagicMock(spec=RadarrMovie)
         radarr_module._movies_cache["data"] = [fake_movie]
@@ -596,6 +597,7 @@ class TestAdditionalRadarrMethods:
     def test_root_folders_cache_hit(self):
         """Covers the cache hit branch for root folders."""
         import time
+
         import src.core.radarr as radarr_module
 
         radarr_module._root_folders_cache["data"] = [{"path": "/cached"}]

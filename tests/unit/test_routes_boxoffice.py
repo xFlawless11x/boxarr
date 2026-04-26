@@ -1,7 +1,8 @@
 """Tests for /api/boxoffice routes."""
 
-import pytest
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from src.utils.config import settings
 
