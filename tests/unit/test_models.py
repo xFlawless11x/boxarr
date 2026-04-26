@@ -4,7 +4,12 @@ from datetime import datetime
 
 import pytest
 
-from src.core.models import MovieCard, MovieStatus, WeeklyBoxOfficeEntry, WeeklyBoxOfficeReport
+from src.core.models import (
+    MovieCard,
+    MovieStatus,
+    WeeklyBoxOfficeEntry,
+    WeeklyBoxOfficeReport,
+)
 
 
 class TestMovieStatus:
@@ -117,7 +122,9 @@ class TestWeeklyBoxOfficeEntry:
         return MovieCard(tmdb_id=1, title="Test")
 
     def test_formatted_weekend_gross_present(self):
-        entry = WeeklyBoxOfficeEntry(rank=1, movie_card=self._make_card(), weekend_gross=1234567)
+        entry = WeeklyBoxOfficeEntry(
+            rank=1, movie_card=self._make_card(), weekend_gross=1234567
+        )
         assert entry.formatted_weekend_gross == "$1,234,567"
 
     def test_formatted_weekend_gross_absent(self):
@@ -125,7 +132,9 @@ class TestWeeklyBoxOfficeEntry:
         assert entry.formatted_weekend_gross == "N/A"
 
     def test_formatted_total_gross_present(self):
-        entry = WeeklyBoxOfficeEntry(rank=1, movie_card=self._make_card(), total_gross=9000000)
+        entry = WeeklyBoxOfficeEntry(
+            rank=1, movie_card=self._make_card(), total_gross=9000000
+        )
         assert entry.formatted_total_gross == "$9,000,000"
 
     def test_formatted_total_gross_absent(self):
@@ -134,7 +143,9 @@ class TestWeeklyBoxOfficeEntry:
 
     def test_to_dict(self):
         card = self._make_card()
-        entry = WeeklyBoxOfficeEntry(rank=2, movie_card=card, weekend_gross=500000, is_new_release=True)
+        entry = WeeklyBoxOfficeEntry(
+            rank=2, movie_card=card, weekend_gross=500000, is_new_release=True
+        )
         d = entry.to_dict()
         assert d["rank"] == 2
         assert d["weekend_gross"] == 500000
@@ -159,6 +170,7 @@ class TestWeeklyBoxOfficeReport:
     def test_date_range_end_is_6_days_after_start(self):
         report = self._make_report(year=2025, week=10)
         from datetime import timedelta
+
         start, end = report.date_range
         assert end - start == timedelta(days=6)
 

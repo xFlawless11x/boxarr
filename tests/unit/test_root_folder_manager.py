@@ -81,7 +81,9 @@ class TestDetermineRootFolder:
             mock_settings.radarr_root_folder_config.enabled = True
             mock_settings.get_root_folder_for_genres.return_value = "/anime"
             mgr = RootFolderManager(radarr_service=svc)
-            result = mgr.determine_root_folder(genres=["Animation"], movie_title="Spirited Away")
+            result = mgr.determine_root_folder(
+                genres=["Animation"], movie_title="Spirited Away"
+            )
         assert result == "/anime"
 
     def test_falls_back_when_mapped_folder_unavailable(self):

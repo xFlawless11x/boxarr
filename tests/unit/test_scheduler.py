@@ -199,6 +199,7 @@ class TestGetHistory:
     @pytest.mark.anyio
     async def test_empty_history_dir(self, isolated_data_dir, monkeypatch):
         from src.utils.config import settings
+
         monkeypatch.setattr(settings, "boxarr_data_directory", isolated_data_dir)
         with patch("src.core.scheduler.settings") as mock_settings:
             history_dir = isolated_data_dir / "history"
@@ -215,10 +216,14 @@ class TestGetHistory:
         with patch("src.core.scheduler.settings") as mock_settings:
             history_dir = isolated_data_dir / "history"
             history_dir.mkdir()
-            (history_dir / "202501_latest.json").write_text(_json.dumps({
-                "timestamp": "2025-01-07T23:00:00",
-                "total_count": 10,
-            }))
+            (history_dir / "202501_latest.json").write_text(
+                _json.dumps(
+                    {
+                        "timestamp": "2025-01-07T23:00:00",
+                        "total_count": 10,
+                    }
+                )
+            )
             mock_settings.get_history_path.return_value = history_dir
             sched = _make_scheduler()
             result = await sched.get_history()
@@ -234,7 +239,9 @@ class TestProcessMatchResults:
 
         matched = MagicMock()
         matched.is_matched = True
-        matched.box_office_movie = BoxOfficeMovie(rank=1, title="Film A", weekend_gross=1_000_000)
+        matched.box_office_movie = BoxOfficeMovie(
+            rank=1, title="Film A", weekend_gross=1_000_000
+        )
         unmatched = MagicMock()
         unmatched.is_matched = False
         unmatched.box_office_movie = BoxOfficeMovie(rank=2, title="Film B")

@@ -99,14 +99,28 @@ class TestRepairMissingMetadata:
         data = {
             "year": 2025,
             "week": 1,
-            "movies": [{"rank": 1, "title": "Poster Missing", "tmdb_id": 1, "radarr_id": None, "poster": None, "year": 2025}],
+            "movies": [
+                {
+                    "rank": 1,
+                    "title": "Poster Missing",
+                    "tmdb_id": 1,
+                    "radarr_id": None,
+                    "poster": None,
+                    "year": 2025,
+                }
+            ],
         }
         (weekly_dir / "202501.json").write_text(_json.dumps(data))
 
         with patch("src.api.routes.admin.RadarrService") as mock_cls:
             instance = MagicMock()
             instance.search_movie.return_value = [
-                {"tmdbId": 1, "year": 2025, "remotePoster": "https://example.com/p.jpg", "genres": []}
+                {
+                    "tmdbId": 1,
+                    "year": 2025,
+                    "remotePoster": "https://example.com/p.jpg",
+                    "genres": [],
+                }
             ]
             mock_cls.return_value = instance
             resp = client.post(
@@ -125,7 +139,16 @@ class TestRepairMissingMetadata:
         data = {
             "year": 2025,
             "week": 1,
-            "movies": [{"rank": 1, "title": "Film To Fix", "tmdb_id": None, "radarr_id": None, "poster": None, "year": 2025}],
+            "movies": [
+                {
+                    "rank": 1,
+                    "title": "Film To Fix",
+                    "tmdb_id": None,
+                    "radarr_id": None,
+                    "poster": None,
+                    "year": 2025,
+                }
+            ],
         }
         json_path = weekly_dir / "202501.json"
         json_path.write_text(_json.dumps(data))
@@ -133,7 +156,12 @@ class TestRepairMissingMetadata:
         with patch("src.api.routes.admin.RadarrService") as mock_cls:
             instance = MagicMock()
             instance.search_movie.return_value = [
-                {"tmdbId": 99, "year": 2025, "remotePoster": "https://poster.jpg", "genres": []}
+                {
+                    "tmdbId": 99,
+                    "year": 2025,
+                    "remotePoster": "https://poster.jpg",
+                    "genres": [],
+                }
             ]
             mock_cls.return_value = instance
             resp = client.post(

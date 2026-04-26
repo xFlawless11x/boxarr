@@ -46,7 +46,9 @@ class TestSchedulerStatus:
         assert "running" in data
         assert "cron_expression" in data
 
-    def test_includes_last_run_from_history(self, client, patched_scheduler, isolated_data_dir):
+    def test_includes_last_run_from_history(
+        self, client, patched_scheduler, isolated_data_dir
+    ):
         history_dir = isolated_data_dir / "history"
         history_dir.mkdir()
         hist_data = {
@@ -86,7 +88,9 @@ class TestSchedulerHistory:
         assert runs[0]["movies_found"] == 10
         assert runs[0]["movies_added"] == 2
 
-    def test_malformed_filename_skipped(self, client, patched_scheduler, isolated_data_dir):
+    def test_malformed_filename_skipped(
+        self, client, patched_scheduler, isolated_data_dir
+    ):
         history_dir = isolated_data_dir / "history"
         history_dir.mkdir()
         (history_dir / "bad_file.json").write_text("{}")
@@ -152,9 +156,10 @@ class TestUpdateWeek:
         monkeypatch.setattr(settings, "boxarr_features_box_office_limit", 10)
         from src.core.boxoffice import BoxOfficeMovie
 
-        with patch("src.core.boxoffice.BoxOfficeService") as bo_cls, patch(
-            "src.core.json_generator.WeeklyDataGenerator"
-        ) as gen_cls:
+        with (
+            patch("src.core.boxoffice.BoxOfficeService") as bo_cls,
+            patch("src.core.json_generator.WeeklyDataGenerator") as gen_cls,
+        ):
             bo_instance = MagicMock()
             bo_instance.fetch_weekend_box_office.return_value = [
                 BoxOfficeMovie(rank=1, title="Film A", weekend_gross=1_000_000)
@@ -162,19 +167,25 @@ class TestUpdateWeek:
             bo_cls.return_value = bo_instance
             gen_instance = MagicMock()
             gen_cls.return_value = gen_instance
-            resp = client.post("/api/scheduler/update-week", json={"year": 2024, "week": 1})
+            resp = client.post(
+                "/api/scheduler/update-week", json={"year": 2024, "week": 1}
+            )
         assert resp.status_code == 200
         data = resp.json()
         assert data["success"] is True
 
-    def test_no_box_office_data_returns_failure(self, client, patched_scheduler, monkeypatch):
+    def test_no_box_office_data_returns_failure(
+        self, client, patched_scheduler, monkeypatch
+    ):
         monkeypatch.setattr(settings, "radarr_api_key", "")
         monkeypatch.setattr(settings, "boxarr_features_box_office_limit", 10)
         with patch("src.core.boxoffice.BoxOfficeService") as bo_cls:
             bo_instance = MagicMock()
             bo_instance.fetch_weekend_box_office.return_value = []
             bo_cls.return_value = bo_instance
-            resp = client.post("/api/scheduler/update-week", json={"year": 2024, "week": 1})
+            resp = client.post(
+                "/api/scheduler/update-week", json={"year": 2024, "week": 1}
+            )
         assert resp.status_code == 200
         data = resp.json()
         assert data["success"] is False

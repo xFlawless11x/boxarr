@@ -106,7 +106,9 @@ class TestHistoricalBoxOffice:
     def test_scraper_error_returns_500(self, client):
         with patch("src.api.routes.boxoffice.BoxOfficeService") as mock_cls:
             instance = MagicMock()
-            instance.fetch_weekend_box_office.side_effect = RuntimeError("network error")
+            instance.fetch_weekend_box_office.side_effect = RuntimeError(
+                "network error"
+            )
             mock_cls.return_value = instance
             resp = client.get("/api/boxoffice/history/2024/W01")
 

@@ -22,7 +22,9 @@ def _make_unmatched(rank=1, title="Unmatched Film"):
     return MatchResult(box_office_movie=bo, radarr_movie=None, confidence=0.0)
 
 
-def _make_matched(rank=1, title="Matched Film", has_file=False, status="released", is_available=True):
+def _make_matched(
+    rank=1, title="Matched Film", has_file=False, status="released", is_available=True
+):
     bo = _make_bo_movie(rank=rank, title=title)
     movie = MagicMock()
     movie.id = 100

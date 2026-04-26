@@ -34,7 +34,9 @@ def _make_radarr_svc(profiles=None, search_results=None, add_result=None):
         "originalLanguage": {"name": "English"},
         "remotePoster": None,
     }
-    svc.search_movie.return_value = search_results if search_results is not None else [search_result]
+    svc.search_movie.return_value = (
+        search_results if search_results is not None else [search_result]
+    )
     added = MagicMock()
     added.title = "Test Movie"
     svc.add_movie.return_value = add_result or added
@@ -54,10 +56,18 @@ class TestAutoAddMissingMovies:
     def test_adds_unmatched_movie(self, monkeypatch):
         monkeypatch.setattr(settings, "radarr_quality_profile_default", "HD-1080p")
         monkeypatch.setattr(settings, "boxarr_features_auto_add_limit", 100)
-        monkeypatch.setattr(settings, "boxarr_features_auto_add_ignore_rereleases", False)
-        monkeypatch.setattr(settings, "boxarr_features_auto_add_genre_filter_enabled", False)
-        monkeypatch.setattr(settings, "boxarr_features_auto_add_rating_filter_enabled", False)
-        monkeypatch.setattr(settings, "boxarr_features_auto_add_language_filter_enabled", False)
+        monkeypatch.setattr(
+            settings, "boxarr_features_auto_add_ignore_rereleases", False
+        )
+        monkeypatch.setattr(
+            settings, "boxarr_features_auto_add_genre_filter_enabled", False
+        )
+        monkeypatch.setattr(
+            settings, "boxarr_features_auto_add_rating_filter_enabled", False
+        )
+        monkeypatch.setattr(
+            settings, "boxarr_features_auto_add_language_filter_enabled", False
+        )
         svc = _make_radarr_svc()
         with patch("src.core.auto_add.IgnoreList") as mock_il:
             mock_il.return_value.get_ignored_tmdb_ids.return_value = set()
@@ -75,10 +85,18 @@ class TestAutoAddMissingMovies:
     def test_not_found_in_tmdb_skips(self, monkeypatch):
         monkeypatch.setattr(settings, "radarr_quality_profile_default", "HD-1080p")
         monkeypatch.setattr(settings, "boxarr_features_auto_add_limit", 100)
-        monkeypatch.setattr(settings, "boxarr_features_auto_add_ignore_rereleases", False)
-        monkeypatch.setattr(settings, "boxarr_features_auto_add_genre_filter_enabled", False)
-        monkeypatch.setattr(settings, "boxarr_features_auto_add_rating_filter_enabled", False)
-        monkeypatch.setattr(settings, "boxarr_features_auto_add_language_filter_enabled", False)
+        monkeypatch.setattr(
+            settings, "boxarr_features_auto_add_ignore_rereleases", False
+        )
+        monkeypatch.setattr(
+            settings, "boxarr_features_auto_add_genre_filter_enabled", False
+        )
+        monkeypatch.setattr(
+            settings, "boxarr_features_auto_add_rating_filter_enabled", False
+        )
+        monkeypatch.setattr(
+            settings, "boxarr_features_auto_add_language_filter_enabled", False
+        )
         svc = _make_radarr_svc(search_results=[])
         with patch("src.core.auto_add.IgnoreList") as mock_il:
             mock_il.return_value.get_ignored_tmdb_ids.return_value = set()
@@ -88,10 +106,18 @@ class TestAutoAddMissingMovies:
     def test_ignored_movie_skipped(self, monkeypatch):
         monkeypatch.setattr(settings, "radarr_quality_profile_default", "HD-1080p")
         monkeypatch.setattr(settings, "boxarr_features_auto_add_limit", 100)
-        monkeypatch.setattr(settings, "boxarr_features_auto_add_ignore_rereleases", False)
-        monkeypatch.setattr(settings, "boxarr_features_auto_add_genre_filter_enabled", False)
-        monkeypatch.setattr(settings, "boxarr_features_auto_add_rating_filter_enabled", False)
-        monkeypatch.setattr(settings, "boxarr_features_auto_add_language_filter_enabled", False)
+        monkeypatch.setattr(
+            settings, "boxarr_features_auto_add_ignore_rereleases", False
+        )
+        monkeypatch.setattr(
+            settings, "boxarr_features_auto_add_genre_filter_enabled", False
+        )
+        monkeypatch.setattr(
+            settings, "boxarr_features_auto_add_rating_filter_enabled", False
+        )
+        monkeypatch.setattr(
+            settings, "boxarr_features_auto_add_language_filter_enabled", False
+        )
         svc = _make_radarr_svc()
         with patch("src.core.auto_add.IgnoreList") as mock_il:
             mock_il.return_value.get_ignored_tmdb_ids.return_value = {12345}
@@ -101,10 +127,18 @@ class TestAutoAddMissingMovies:
     def test_rerelease_skipped(self, monkeypatch):
         monkeypatch.setattr(settings, "radarr_quality_profile_default", "HD-1080p")
         monkeypatch.setattr(settings, "boxarr_features_auto_add_limit", 100)
-        monkeypatch.setattr(settings, "boxarr_features_auto_add_ignore_rereleases", True)
-        monkeypatch.setattr(settings, "boxarr_features_auto_add_genre_filter_enabled", False)
-        monkeypatch.setattr(settings, "boxarr_features_auto_add_rating_filter_enabled", False)
-        monkeypatch.setattr(settings, "boxarr_features_auto_add_language_filter_enabled", False)
+        monkeypatch.setattr(
+            settings, "boxarr_features_auto_add_ignore_rereleases", True
+        )
+        monkeypatch.setattr(
+            settings, "boxarr_features_auto_add_genre_filter_enabled", False
+        )
+        monkeypatch.setattr(
+            settings, "boxarr_features_auto_add_rating_filter_enabled", False
+        )
+        monkeypatch.setattr(
+            settings, "boxarr_features_auto_add_language_filter_enabled", False
+        )
         search_result = {
             "tmdbId": 99,
             "title": "Old Movie",
@@ -121,12 +155,24 @@ class TestAutoAddMissingMovies:
     def test_genre_whitelist_skips_non_matching(self, monkeypatch):
         monkeypatch.setattr(settings, "radarr_quality_profile_default", "HD-1080p")
         monkeypatch.setattr(settings, "boxarr_features_auto_add_limit", 100)
-        monkeypatch.setattr(settings, "boxarr_features_auto_add_ignore_rereleases", False)
-        monkeypatch.setattr(settings, "boxarr_features_auto_add_genre_filter_enabled", True)
-        monkeypatch.setattr(settings, "boxarr_features_auto_add_genre_filter_mode", "whitelist")
-        monkeypatch.setattr(settings, "boxarr_features_auto_add_genre_whitelist", ["Animation"])
-        monkeypatch.setattr(settings, "boxarr_features_auto_add_rating_filter_enabled", False)
-        monkeypatch.setattr(settings, "boxarr_features_auto_add_language_filter_enabled", False)
+        monkeypatch.setattr(
+            settings, "boxarr_features_auto_add_ignore_rereleases", False
+        )
+        monkeypatch.setattr(
+            settings, "boxarr_features_auto_add_genre_filter_enabled", True
+        )
+        monkeypatch.setattr(
+            settings, "boxarr_features_auto_add_genre_filter_mode", "whitelist"
+        )
+        monkeypatch.setattr(
+            settings, "boxarr_features_auto_add_genre_whitelist", ["Animation"]
+        )
+        monkeypatch.setattr(
+            settings, "boxarr_features_auto_add_rating_filter_enabled", False
+        )
+        monkeypatch.setattr(
+            settings, "boxarr_features_auto_add_language_filter_enabled", False
+        )
         svc = _make_radarr_svc()  # search returns genres=["Action"]
         with patch("src.core.auto_add.IgnoreList") as mock_il:
             mock_il.return_value.get_ignored_tmdb_ids.return_value = set()
@@ -136,12 +182,24 @@ class TestAutoAddMissingMovies:
     def test_genre_blacklist_skips_blacklisted(self, monkeypatch):
         monkeypatch.setattr(settings, "radarr_quality_profile_default", "HD-1080p")
         monkeypatch.setattr(settings, "boxarr_features_auto_add_limit", 100)
-        monkeypatch.setattr(settings, "boxarr_features_auto_add_ignore_rereleases", False)
-        monkeypatch.setattr(settings, "boxarr_features_auto_add_genre_filter_enabled", True)
-        monkeypatch.setattr(settings, "boxarr_features_auto_add_genre_filter_mode", "blacklist")
-        monkeypatch.setattr(settings, "boxarr_features_auto_add_genre_blacklist", ["Action"])
-        monkeypatch.setattr(settings, "boxarr_features_auto_add_rating_filter_enabled", False)
-        monkeypatch.setattr(settings, "boxarr_features_auto_add_language_filter_enabled", False)
+        monkeypatch.setattr(
+            settings, "boxarr_features_auto_add_ignore_rereleases", False
+        )
+        monkeypatch.setattr(
+            settings, "boxarr_features_auto_add_genre_filter_enabled", True
+        )
+        monkeypatch.setattr(
+            settings, "boxarr_features_auto_add_genre_filter_mode", "blacklist"
+        )
+        monkeypatch.setattr(
+            settings, "boxarr_features_auto_add_genre_blacklist", ["Action"]
+        )
+        monkeypatch.setattr(
+            settings, "boxarr_features_auto_add_rating_filter_enabled", False
+        )
+        monkeypatch.setattr(
+            settings, "boxarr_features_auto_add_language_filter_enabled", False
+        )
         svc = _make_radarr_svc()  # search returns genres=["Action"]
         with patch("src.core.auto_add.IgnoreList") as mock_il:
             mock_il.return_value.get_ignored_tmdb_ids.return_value = set()
@@ -151,11 +209,21 @@ class TestAutoAddMissingMovies:
     def test_rating_filter_skips_wrong_rating(self, monkeypatch):
         monkeypatch.setattr(settings, "radarr_quality_profile_default", "HD-1080p")
         monkeypatch.setattr(settings, "boxarr_features_auto_add_limit", 100)
-        monkeypatch.setattr(settings, "boxarr_features_auto_add_ignore_rereleases", False)
-        monkeypatch.setattr(settings, "boxarr_features_auto_add_genre_filter_enabled", False)
-        monkeypatch.setattr(settings, "boxarr_features_auto_add_rating_filter_enabled", True)
-        monkeypatch.setattr(settings, "boxarr_features_auto_add_rating_whitelist", ["G", "PG"])
-        monkeypatch.setattr(settings, "boxarr_features_auto_add_language_filter_enabled", False)
+        monkeypatch.setattr(
+            settings, "boxarr_features_auto_add_ignore_rereleases", False
+        )
+        monkeypatch.setattr(
+            settings, "boxarr_features_auto_add_genre_filter_enabled", False
+        )
+        monkeypatch.setattr(
+            settings, "boxarr_features_auto_add_rating_filter_enabled", True
+        )
+        monkeypatch.setattr(
+            settings, "boxarr_features_auto_add_rating_whitelist", ["G", "PG"]
+        )
+        monkeypatch.setattr(
+            settings, "boxarr_features_auto_add_language_filter_enabled", False
+        )
         svc = _make_radarr_svc()  # certification="PG-13"
         with patch("src.core.auto_add.IgnoreList") as mock_il:
             mock_il.return_value.get_ignored_tmdb_ids.return_value = set()
@@ -165,12 +233,24 @@ class TestAutoAddMissingMovies:
     def test_language_whitelist_skips_wrong_language(self, monkeypatch):
         monkeypatch.setattr(settings, "radarr_quality_profile_default", "HD-1080p")
         monkeypatch.setattr(settings, "boxarr_features_auto_add_limit", 100)
-        monkeypatch.setattr(settings, "boxarr_features_auto_add_ignore_rereleases", False)
-        monkeypatch.setattr(settings, "boxarr_features_auto_add_genre_filter_enabled", False)
-        monkeypatch.setattr(settings, "boxarr_features_auto_add_rating_filter_enabled", False)
-        monkeypatch.setattr(settings, "boxarr_features_auto_add_language_filter_enabled", True)
-        monkeypatch.setattr(settings, "boxarr_features_auto_add_language_filter_mode", "whitelist")
-        monkeypatch.setattr(settings, "boxarr_features_auto_add_language_whitelist", ["Japanese"])
+        monkeypatch.setattr(
+            settings, "boxarr_features_auto_add_ignore_rereleases", False
+        )
+        monkeypatch.setattr(
+            settings, "boxarr_features_auto_add_genre_filter_enabled", False
+        )
+        monkeypatch.setattr(
+            settings, "boxarr_features_auto_add_rating_filter_enabled", False
+        )
+        monkeypatch.setattr(
+            settings, "boxarr_features_auto_add_language_filter_enabled", True
+        )
+        monkeypatch.setattr(
+            settings, "boxarr_features_auto_add_language_filter_mode", "whitelist"
+        )
+        monkeypatch.setattr(
+            settings, "boxarr_features_auto_add_language_whitelist", ["Japanese"]
+        )
         svc = _make_radarr_svc()  # language=English
         with patch("src.core.auto_add.IgnoreList") as mock_il:
             mock_il.return_value.get_ignored_tmdb_ids.return_value = set()
@@ -180,12 +260,24 @@ class TestAutoAddMissingMovies:
     def test_language_blacklist_skips_blacklisted(self, monkeypatch):
         monkeypatch.setattr(settings, "radarr_quality_profile_default", "HD-1080p")
         monkeypatch.setattr(settings, "boxarr_features_auto_add_limit", 100)
-        monkeypatch.setattr(settings, "boxarr_features_auto_add_ignore_rereleases", False)
-        monkeypatch.setattr(settings, "boxarr_features_auto_add_genre_filter_enabled", False)
-        monkeypatch.setattr(settings, "boxarr_features_auto_add_rating_filter_enabled", False)
-        monkeypatch.setattr(settings, "boxarr_features_auto_add_language_filter_enabled", True)
-        monkeypatch.setattr(settings, "boxarr_features_auto_add_language_filter_mode", "blacklist")
-        monkeypatch.setattr(settings, "boxarr_features_auto_add_language_blacklist", ["English"])
+        monkeypatch.setattr(
+            settings, "boxarr_features_auto_add_ignore_rereleases", False
+        )
+        monkeypatch.setattr(
+            settings, "boxarr_features_auto_add_genre_filter_enabled", False
+        )
+        monkeypatch.setattr(
+            settings, "boxarr_features_auto_add_rating_filter_enabled", False
+        )
+        monkeypatch.setattr(
+            settings, "boxarr_features_auto_add_language_filter_enabled", True
+        )
+        monkeypatch.setattr(
+            settings, "boxarr_features_auto_add_language_filter_mode", "blacklist"
+        )
+        monkeypatch.setattr(
+            settings, "boxarr_features_auto_add_language_blacklist", ["English"]
+        )
         svc = _make_radarr_svc()  # language=English
         with patch("src.core.auto_add.IgnoreList") as mock_il:
             mock_il.return_value.get_ignored_tmdb_ids.return_value = set()
@@ -195,10 +287,18 @@ class TestAutoAddMissingMovies:
     def test_limit_applied(self, monkeypatch):
         monkeypatch.setattr(settings, "radarr_quality_profile_default", "HD-1080p")
         monkeypatch.setattr(settings, "boxarr_features_auto_add_limit", 1)
-        monkeypatch.setattr(settings, "boxarr_features_auto_add_ignore_rereleases", False)
-        monkeypatch.setattr(settings, "boxarr_features_auto_add_genre_filter_enabled", False)
-        monkeypatch.setattr(settings, "boxarr_features_auto_add_rating_filter_enabled", False)
-        monkeypatch.setattr(settings, "boxarr_features_auto_add_language_filter_enabled", False)
+        monkeypatch.setattr(
+            settings, "boxarr_features_auto_add_ignore_rereleases", False
+        )
+        monkeypatch.setattr(
+            settings, "boxarr_features_auto_add_genre_filter_enabled", False
+        )
+        monkeypatch.setattr(
+            settings, "boxarr_features_auto_add_rating_filter_enabled", False
+        )
+        monkeypatch.setattr(
+            settings, "boxarr_features_auto_add_language_filter_enabled", False
+        )
         svc = _make_radarr_svc()
         movies = [_make_result(title=f"Movie {i}", rank=i) for i in range(1, 5)]
         with patch("src.core.auto_add.IgnoreList") as mock_il:
@@ -210,10 +310,18 @@ class TestAutoAddMissingMovies:
     def test_exception_during_add_continues(self, monkeypatch):
         monkeypatch.setattr(settings, "radarr_quality_profile_default", "HD-1080p")
         monkeypatch.setattr(settings, "boxarr_features_auto_add_limit", 100)
-        monkeypatch.setattr(settings, "boxarr_features_auto_add_ignore_rereleases", False)
-        monkeypatch.setattr(settings, "boxarr_features_auto_add_genre_filter_enabled", False)
-        monkeypatch.setattr(settings, "boxarr_features_auto_add_rating_filter_enabled", False)
-        monkeypatch.setattr(settings, "boxarr_features_auto_add_language_filter_enabled", False)
+        monkeypatch.setattr(
+            settings, "boxarr_features_auto_add_ignore_rereleases", False
+        )
+        monkeypatch.setattr(
+            settings, "boxarr_features_auto_add_genre_filter_enabled", False
+        )
+        monkeypatch.setattr(
+            settings, "boxarr_features_auto_add_rating_filter_enabled", False
+        )
+        monkeypatch.setattr(
+            settings, "boxarr_features_auto_add_language_filter_enabled", False
+        )
         svc = _make_radarr_svc()
         svc.add_movie.side_effect = RuntimeError("add failed")
         with patch("src.core.auto_add.IgnoreList") as mock_il:
