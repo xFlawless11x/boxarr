@@ -21,6 +21,8 @@ jobs:
   lint:
     name: Code Quality & Linting
     runs-on: ubuntu-latest
+    env:
+      PYTHON_VERSION: '3.12'
     
     steps:
     - name: Checkout code
