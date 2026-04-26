@@ -5,6 +5,7 @@ FROM python:3.11-slim
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
     curl \
+    gosu \
     && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
@@ -18,8 +19,18 @@ RUN pip install --no-cache-dir -r requirements-prod.txt
 COPY src/ /app/src/
 COPY config/default.yaml /app/config/
 
-# Create config directory
-RUN mkdir -p /config
+# Create non-root user; /config ownership is fixed at runtime by the entrypoint
+RUN groupadd -r boxarr && useradd -r -g boxarr -d /app -s /sbin/nologin boxarr \
+    && mkdir -p /config \
+    && chown -R boxarr:boxarr /app
+
+# Entrypoint: chown /config (needs root), then drop to boxarr via gosu
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
+# Version baked in at build time — passed via --build-arg APP_VERSION=x.y.z
+ARG APP_VERSION=dev
+ENV APP_VERSION=$APP_VERSION
 
 # Environment variables (optional - can be configured via UI)
 ENV PYTHONUNBUFFERED=1 \
@@ -36,5 +47,5 @@ EXPOSE 8888
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
     CMD curl -f http://localhost:8888/api/health || exit 1
 
-# Run application
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["python", "-m", "src.main"]

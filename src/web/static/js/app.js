@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Boxarr Frontend Application
  * Unified JavaScript for all pages
  */
@@ -22,6 +22,47 @@ function apiUrl(endpoint) {
     }
     return makeUrl('/api' + endpoint);
 }
+
+// ==========================================
+// ApiClient — centralised fetch wrapper
+// ==========================================
+class ApiClient {
+    constructor(basePath) {
+        this.basePath = basePath || '';
+    }
+
+    _url(endpoint) {
+        if (!endpoint.startsWith('/')) endpoint = '/' + endpoint;
+        return this.basePath + '/api' + endpoint;
+    }
+
+    async _request(method, endpoint, body, signal) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 30_000);
+        if (signal) signal.addEventListener('abort', () => controller.abort());
+        const opts = { method, headers: { 'Content-Type': 'application/json' }, signal: controller.signal };
+        if (body !== undefined) opts.body = JSON.stringify(body);
+        try {
+            const res = await fetch(this._url(endpoint), opts);
+            clearTimeout(timer);
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.detail || err.message || `HTTP ${res.status}`);
+            }
+            return res.json();
+        } catch (e) {
+            clearTimeout(timer);
+            if (e.name === 'AbortError') throw new Error('Request timed out after 30s');
+            throw e;
+        }
+    }
+
+    get(endpoint, signal)        { return this._request('GET',    endpoint, undefined, signal); }
+    post(endpoint, body, signal) { return this._request('POST',   endpoint, body,      signal); }
+    del(endpoint, signal)        { return this._request('DELETE', endpoint, undefined, signal); }
+}
+
+window.api = new ApiClient(window.BOXARR_BASE_PATH || '');
 
 // Helper to check if current path matches a given path (handling base path)
 function isCurrentPath(targetPath) {
@@ -320,6 +361,18 @@ function reloadScheduler() {
     let isModalOpen = false;
     let connectionTested = false;
 
+    // Disable a button for the duration of an async operation, restore on completion
+    function withInFlight(btn, asyncFn) {
+        if (!btn || btn.disabled) return;
+        btn.disabled = true;
+        const original = btn.textContent;
+        btn.textContent = 'Working…';
+        Promise.resolve(asyncFn()).finally(() => {
+            btn.disabled = false;
+            btn.textContent = original;
+        });
+    }
+
     // ==========================================
     // Core Functions
     // ==========================================
@@ -392,363 +445,54 @@ function reloadScheduler() {
             });
     }
 
-    /**
-     * Show a temporary message to the user
-     */
-    function showMessage(message, type = 'info') {
-        console.log(`[${type}] ${message}`);
-        
-        // Create toast notification
+    // Toast queue — max 3 visible at once
+    const MAX_TOASTS = 3;
+    const toastQueue = [];
+    let toastContainer = null;
+
+    function getToastContainer() {
+        if (!toastContainer) {
+            toastContainer = document.createElement('div');
+            toastContainer.className = 'toast-container';
+            toastContainer.setAttribute('role', 'alert');
+            toastContainer.setAttribute('aria-live', 'assertive');
+            toastContainer.setAttribute('aria-atomic', 'false');
+            document.body.appendChild(toastContainer);
+        }
+        return toastContainer;
+    }
+
+    function processToastQueue() {
+        const container = getToastContainer();
+        const active = container.querySelectorAll('.toast:not(.toast-exit)').length;
+        while (toastQueue.length > 0 && active < MAX_TOASTS) {
+            const { message, type } = toastQueue.shift();
+            _renderToast(message, type);
+        }
+    }
+
+    function _renderToast(message, type) {
+        const container = getToastContainer();
         const toast = document.createElement('div');
         toast.className = `toast toast-${type}`;
         toast.textContent = message;
-        toast.style.cssText = `
-            position: fixed;
-            top: 20px;
-            right: 20px;
-            padding: 1rem 1.5rem;
-            background: ${type === 'success' ? '#48bb78' : type === 'error' ? '#f56565' : '#667eea'};
-            color: white;
-            border-radius: 8px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-            z-index: 10000;
-            animation: slideIn 0.3s ease;
-        `;
-        
-        document.body.appendChild(toast);
-        
-        setTimeout(() => {
-            toast.style.animation = 'slideOut 0.3s ease';
-            setTimeout(() => toast.remove(), 300);
-        }, 3000);
+        function dismiss() {
+            toast.classList.add('toast-exit');
+            setTimeout(() => { toast.remove(); processToastQueue(); }, 300);
+        }
+        container.appendChild(toast);
+        setTimeout(dismiss, 3000);
     }
 
-    // ==========================================
-    // Dashboard Functions
-    // ==========================================
-
-    window.updateCurrentWeek = function() {
-        const modal = document.getElementById('progressModal');
-        const progressMessage = document.getElementById('progressMessage');
-        const progressLog = document.getElementById('progressLog');
-        const progressFooter = document.getElementById('progressFooter');
-        
-        if (modal) {
-            modal.classList.add('show');
-            isModalOpen = true;
+    function showMessage(message, type = 'info') {
+        console.log(`[${type}] ${message}`);
+        const active = getToastContainer().querySelectorAll('.toast:not(.toast-exit)').length;
+        if (active >= MAX_TOASTS) {
+            toastQueue.push({ message, type });
+        } else {
+            _renderToast(message, type);
         }
-        
-        // Clear previous log and set initial message
-        if (progressLog) progressLog.innerHTML = '';
-        if (progressMessage) progressMessage.textContent = 'Fetching box office data from Box Office Mojo...';
-        if (progressFooter) progressFooter.style.display = 'none';
-        
-        // Add log entry
-        function addLogEntry(message, type = 'info') {
-            if (progressLog) {
-                const entry = document.createElement('div');
-                entry.style.color = type === 'error' ? '#f56565' : type === 'success' ? '#48bb78' : '#718096';
-                entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
-                progressLog.appendChild(entry);
-                progressLog.scrollTop = progressLog.scrollHeight;
-            }
-        }
-        
-        addLogEntry('Starting box office update...');
-        
-        fetch(apiUrl('/scheduler/trigger'), { method: 'POST' })
-            .then(response => {
-                addLogEntry('Received response from server');
-                return response.json();
-            })
-            .then(data => {
-                if (data.success) {
-                    addLogEntry(`Found ${data.movies_found || 0} movies`, 'success');
-                    if (data.movies_added && data.movies_added > 0) {
-                        addLogEntry(`Added ${data.movies_added} new movies to Radarr`, 'success');
-                    }
-                    if (progressMessage) progressMessage.textContent = '✅ Update completed successfully!';
-                    addLogEntry('Update completed!', 'success');
-                    if (progressFooter) progressFooter.style.display = 'block';
-                    setTimeout(() => window.location.reload(), 2000);
-                } else {
-                    const errorMsg = data.message || data.error || 'Unknown error occurred';
-                    if (progressMessage) progressMessage.textContent = '❌ Update failed';
-                    addLogEntry(`Error: ${errorMsg}`, 'error');
-                    
-                    // Provide helpful error messages
-                    if (errorMsg.includes('connection') || errorMsg.includes('Connection')) {
-                        addLogEntry('Please check your Radarr connection settings', 'error');
-                    } else if (errorMsg.includes('API')) {
-                        addLogEntry('Please verify your Radarr API key', 'error');
-                    }
-                    
-                    if (progressFooter) progressFooter.style.display = 'block';
-                }
-            })
-            .catch(error => {
-                if (progressMessage) progressMessage.textContent = '❌ Network error';
-                addLogEntry(`Network error: ${error.message}`, 'error');
-                addLogEntry('Please check if the Boxarr server is running', 'error');
-                if (progressFooter) progressFooter.style.display = 'block';
-            });
-    };
-
-    // Global variables for historical week selection
-    let selectedHistoricalWeekUrl = null;
-    let selectedHistoricalWeekText = null;
-
-    window.showHistoricalWeekModal = function(weekUrl, weekText) {
-        selectedHistoricalWeekUrl = weekUrl;
-        selectedHistoricalWeekText = weekText;
-        
-        const modal = document.getElementById('historicalWeekModal');
-        const weekTextEl = document.getElementById('selectedWeekText');
-        
-        if (weekTextEl) {
-            weekTextEl.textContent = weekText;
-        }
-        
-        if (modal) {
-            modal.classList.add('show');
-            isModalOpen = true;
-        }
-    };
-
-    window.closeHistoricalWeekModal = function() {
-        const modal = document.getElementById('historicalWeekModal');
-        if (modal) {
-            modal.classList.remove('show');
-            isModalOpen = false;
-        }
-        selectedHistoricalWeekUrl = null;
-        selectedHistoricalWeekText = null;
-    };
-
-    window.fetchHistoricalWeek = function() {
-        if (!selectedHistoricalWeekUrl) return;
-        
-        const weekMatch = selectedHistoricalWeekUrl.match(/\/(\d{4})W(\d{2})/);
-        
-        if (!weekMatch) {
-            showMessage('Invalid week format', 'error');
-            return;
-        }
-        
-        const year = weekMatch[1];
-        const week = weekMatch[2];
-        
-        closeHistoricalWeekModal();
-        
-        const modal = document.getElementById('progressModal');
-        const progressTitle = document.getElementById('progressTitle');
-        const progressMessage = document.getElementById('progressMessage');
-        const progressLog = document.getElementById('progressLog');
-        const progressFooter = document.getElementById('progressFooter');
-        
-        if (modal) {
-            modal.classList.add('show');
-            isModalOpen = true;
-        }
-        if (progressTitle) {
-            progressTitle.textContent = `Fetching ${selectedHistoricalWeekText}`;
-        }
-        
-        // Clear previous log and set initial message
-        if (progressLog) progressLog.innerHTML = '';
-        if (progressMessage) progressMessage.textContent = `Fetching box office data for ${selectedHistoricalWeekText}...`;
-        if (progressFooter) progressFooter.style.display = 'none';
-        
-        // Add log entry helper
-        function addLogEntry(message, type = 'info') {
-            if (progressLog) {
-                const entry = document.createElement('div');
-                entry.style.color = type === 'error' ? '#f56565' : type === 'success' ? '#48bb78' : '#718096';
-                entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
-                progressLog.appendChild(entry);
-                progressLog.scrollTop = progressLog.scrollHeight;
-            }
-        }
-        
-        addLogEntry(`Starting historical data fetch for ${selectedHistoricalWeekText}`);
-        
-        fetch(apiUrl('/scheduler/update-week'), {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-                year: parseInt(year), 
-                week: parseInt(week)
-            })
-        })
-        .then(response => {
-            addLogEntry('Received response from server');
-            return response.json();
-        })
-        .then(data => {
-            if (data.success) {
-                addLogEntry(`Found ${data.movies_found || 0} movies`, 'success');
-                if (data.movies_added && data.movies_added > 0) {
-                    addLogEntry(`Added ${data.movies_added} new movies to Radarr`, 'success');
-                }
-                if (progressMessage) progressMessage.textContent = '✅ Historical week fetched successfully!';
-                addLogEntry('Update completed!', 'success');
-                if (progressFooter) progressFooter.style.display = 'block';
-                setTimeout(() => window.location.href = safeUrl(selectedHistoricalWeekUrl), 2000);
-            } else {
-                const errorMsg = data.message || data.error || 'Unknown error occurred';
-                if (progressMessage) progressMessage.textContent = '❌ Fetch failed';
-                addLogEntry(`Error: ${errorMsg}`, 'error');
-                
-                // Provide helpful error messages
-                if (errorMsg.includes('already exists')) {
-                    addLogEntry('This week has already been fetched', 'error');
-                } else if (errorMsg.includes('not found')) {
-                    addLogEntry('No box office data available for this week', 'error');
-                }
-                
-                if (progressFooter) progressFooter.style.display = 'block';
-            }
-        })
-        .catch(error => {
-            if (progressMessage) progressMessage.textContent = '❌ Network error';
-            addLogEntry(`Network error: ${error.message}`, 'error');
-            addLogEntry('Please check if the Boxarr server is running', 'error');
-            if (progressFooter) progressFooter.style.display = 'block';
-        });
-    };
-
-    window.showHistoricalUpdate = function() {
-        const modal = document.getElementById('historicalModal');
-        if (modal) {
-            modal.classList.add('show');
-            isModalOpen = true;
-        }
-    };
-
-    window.closeHistoricalUpdate = function() {
-        const modal = document.getElementById('historicalModal');
-        if (modal) {
-            modal.classList.remove('show');
-            isModalOpen = false;
-        }
-    };
-
-    window.updateHistoricalWeek = function() {
-        const year = document.getElementById('historicalYear').value;
-        const week = document.getElementById('historicalWeek').value;
-        
-        closeHistoricalUpdate();
-        
-        const modal = document.getElementById('progressModal');
-        const progressTitle = document.getElementById('progressTitle');
-        const progressMessage = document.getElementById('progressMessage');
-        const progressLog = document.getElementById('progressLog');
-        const progressFooter = document.getElementById('progressFooter');
-        
-        if (modal) {
-            modal.classList.add('show');
-            isModalOpen = true;
-        }
-        if (progressTitle) {
-            progressTitle.textContent = `Updating Week ${week}, ${year}`;
-        }
-        
-        // Clear previous log and set initial message
-        if (progressLog) progressLog.innerHTML = '';
-        if (progressMessage) progressMessage.textContent = `Fetching box office data for Week ${week}, ${year}...`;
-        if (progressFooter) progressFooter.style.display = 'none';
-        
-        // Add log entry helper
-        function addLogEntry(message, type = 'info') {
-            if (progressLog) {
-                const entry = document.createElement('div');
-                entry.style.color = type === 'error' ? '#f56565' : type === 'success' ? '#48bb78' : '#718096';
-                entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
-                progressLog.appendChild(entry);
-                progressLog.scrollTop = progressLog.scrollHeight;
-            }
-        }
-        
-        addLogEntry(`Starting historical data fetch for Week ${week}, ${year}`);
-        
-        fetch(apiUrl('/scheduler/update-week'), {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-                year: parseInt(year), 
-                week: parseInt(week)
-            })
-        })
-        .then(response => {
-            addLogEntry('Received response from server');
-            return response.json();
-        })
-        .then(data => {
-            if (data.success) {
-                addLogEntry(`Found ${data.movies_found || 0} movies`, 'success');
-                if (data.movies_added && data.movies_added > 0) {
-                    addLogEntry(`Added ${data.movies_added} new movies to Radarr`, 'success');
-                }
-                if (progressMessage) progressMessage.textContent = '✅ Historical week updated successfully!';
-                addLogEntry('Update completed!', 'success');
-                if (progressFooter) progressFooter.style.display = 'block';
-                setTimeout(() => window.location.href = makeUrl(`/${year}W${String(week).padStart(2, '0')}`), 2000);
-            } else {
-                const errorMsg = data.message || data.error || 'Unknown error occurred';
-                if (progressMessage) progressMessage.textContent = '❌ Update failed';
-                addLogEntry(`Error: ${errorMsg}`, 'error');
-                
-                // Provide helpful error messages
-                if (errorMsg.includes('already exists')) {
-                    addLogEntry('This week has already been fetched', 'error');
-                } else if (errorMsg.includes('not found')) {
-                    addLogEntry('No box office data available for this week', 'error');
-                }
-                
-                if (progressFooter) progressFooter.style.display = 'block';
-            }
-        })
-        .catch(error => {
-            if (progressMessage) progressMessage.textContent = '❌ Network error';
-            addLogEntry(`Network error: ${error.message}`, 'error');
-            addLogEntry('Please check if the Boxarr server is running', 'error');
-            if (progressFooter) progressFooter.style.display = 'block';
-        });
-    };
-
-    window.closeProgressModal = function() {
-        const modal = document.getElementById('progressModal');
-        if (modal) {
-            modal.classList.remove('show');
-            isModalOpen = false;
-        }
-        window.location.reload();
-    };
-
-    window.deleteWeek = function(year, week) {
-        if (confirm(`Are you sure you want to delete Week ${week}, ${year}?`)) {
-            fetch(apiUrl(`/weeks/${year}/W${week}/delete`), { method: 'DELETE' })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        showMessage('Week deleted successfully', 'success');
-                        setTimeout(() => window.location.reload(), 1000);
-                    } else {
-                        showMessage('Failed to delete week: ' + (data.message || data.error || 'Unknown error'), 'error');
-                    }
-                })
-                .catch(error => {
-                    showMessage('Error deleting week: ' + error.message, 'error');
-                });
-        }
-    };
-
-    window.changePageSize = function(newSize) {
-        const urlParams = new URLSearchParams(window.location.search);
-        urlParams.set('per_page', newSize);
-        urlParams.set('page', '1'); // Reset to first page when changing page size
-        window.location.href = makeUrl(`/dashboard?${urlParams.toString()}`);
-    };
+    }
 
     // ==========================================
     // Weekly Page Functions
@@ -1388,7 +1132,10 @@ function reloadScheduler() {
         }
         
         showMessage('Saving configuration...', 'info');
-        
+
+        const saveBtn = document.getElementById('saveBtn');
+        if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving…'; }
+
         fetch(apiUrl('/config/save'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1402,10 +1149,12 @@ function reloadScheduler() {
                     window.location.href = makeUrl('/dashboard');
                 }, 1500);
             } else {
+                if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Save Configuration'; }
                 showMessage('Failed to save: ' + (data.error || 'Unknown error'), 'error');
             }
         })
         .catch(error => {
+            if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Save Configuration'; }
             showMessage('Error saving configuration: ' + error.message, 'error');
         });
     };
@@ -1436,11 +1185,25 @@ function reloadScheduler() {
     // Initialize on DOM Load
     // ==========================================
 
+    function startConnectionPolling() {
+        clearInterval(statusCheckInterval);
+        statusCheckInterval = setInterval(checkConnection, 30000);
+    }
+
+    document.addEventListener('visibilitychange', function() {
+        if (document.hidden) {
+            clearInterval(statusCheckInterval);
+        } else {
+            startConnectionPolling();
+            checkConnection();
+        }
+    });
+
     document.addEventListener('DOMContentLoaded', function() {
         // Check connection status
         checkConnection();
-        setInterval(checkConnection, 30000);
-        
+        startConnectionPolling();
+
         // Check for updates (only once on page load)
         checkForUpdates();
         
@@ -1571,10 +1334,98 @@ function reloadScheduler() {
                 isModalOpen = false;
             }
         });
+
+        // Focus trap for accessible modals
+        (function () {
+            const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+            let prevFocused = null;
+            let trapHandler = null;
+            let watchedModal = null;
+
+            function getFocusable(el) {
+                return [...el.querySelectorAll(FOCUSABLE)].filter(
+                    e => getComputedStyle(e).display !== 'none' && !e.closest('[hidden]')
+                );
+            }
+
+            function trapFocus(modal) {
+                prevFocused = modal._trigger || document.activeElement;
+                watchedModal = modal;
+                const focusable = getFocusable(modal);
+                if (focusable.length) focusable[0].focus();
+                trapHandler = function (e) {
+                    if (e.key !== 'Tab') return;
+                    const focusable = getFocusable(modal);
+                    if (!focusable.length) { e.preventDefault(); return; }
+                    const first = focusable[0], last = focusable[focusable.length - 1];
+                    if (e.shiftKey) {
+                        if (document.activeElement === first) { e.preventDefault(); last.focus(); }
+                    } else {
+                        if (document.activeElement === last) { e.preventDefault(); first.focus(); }
+                    }
+                };
+                modal.addEventListener('keydown', trapHandler);
+            }
+
+            function releaseFocus(modal) {
+                if (trapHandler && modal) modal.removeEventListener('keydown', trapHandler);
+                trapHandler = null;
+                watchedModal = null;
+                if (prevFocused && typeof prevFocused.focus === 'function') prevFocused.focus();
+                prevFocused = null;
+            }
+
+            document.querySelectorAll('.modal').forEach(function (modal) {
+                new MutationObserver(function () {
+                    if (modal.classList.contains('show')) {
+                        trapFocus(modal);
+                    } else if (watchedModal === modal) {
+                        releaseFocus(modal);
+                    }
+                }).observe(modal, { attributes: true, attributeFilter: ['class'] });
+            });
+        }());
+
+        // Lazy-load tenure popover content on first hover
+        (function () {
+            function renderTenureChips(weeks) {
+                if (!weeks || !weeks.length) return '<span style="opacity:0.6;font-size:0.75rem;">No data</span>';
+                const base = window.BOXARR_BASE_PATH || '';
+                if (weeks.length === 1) {
+                    const yr = weeks[0].slice(0, 4), wk = weeks[0].slice(4);
+                    return `<div class="tenure-single-wrap"><a href="${base}/${weeks[0]}" class="tenure-single-pill"><span class="tenure-pill-year">${yr}</span><span class="tenure-pill-week">${wk}</span></a></div>`;
+                }
+                let html = '', curYear = '';
+                weeks.forEach(function (week) {
+                    const yr = week.slice(0, 4), wk = week.slice(4);
+                    if (yr !== curYear) {
+                        if (curYear) html += '</div></div>';
+                        html += `<div class="tenure-year-group"><div class="tenure-year-label">${yr}</div><div class="tenure-chips">`;
+                        curYear = yr;
+                    }
+                    html += `<a href="${base}/${week}" class="tenure-chip">${wk}</a>`;
+                });
+                if (curYear) html += '</div></div>';
+                return html;
+            }
+
+            document.addEventListener('mouseenter', function (e) {
+                const badge = e.target.closest('.tenure-badge[data-tmdb-id]');
+                if (!badge) return;
+                const body = badge.querySelector('.tenure-popover-body');
+                if (!body || body.dataset.loaded) return;
+                body.dataset.loaded = 'true';
+                body.innerHTML = '<span style="opacity:0.5;font-size:0.75rem;">Loading…</span>';
+                const tmdbId = badge.dataset.tmdbId;
+                api.get(`/movies/${tmdbId}/weeks`)
+                    .then(function (data) { body.innerHTML = renderTenureChips(data.weeks); })
+                    .catch(function () { body.innerHTML = ''; });
+            }, true);
+        }());
     });
 
-    // Cleanup on page unload
-    window.addEventListener('beforeunload', function() {
+    // Cleanup on page unload (pagehide is reliable for bfcache-enabled browsers)
+    window.addEventListener('pagehide', function() {
         if (statusCheckInterval) {
             clearInterval(statusCheckInterval);
         }
@@ -1601,40 +1452,89 @@ function reloadScheduler() {
     };
 
     window.refreshStoredMovieStatuses = async function (buttonEl) {
-        const originalText = buttonEl ? buttonEl.textContent : 'Refresh Radarr Status';
+        if (!buttonEl) return;
 
-        if (buttonEl) {
-            buttonEl.disabled = true;
-            buttonEl.textContent = 'Refreshing...';
-        }
+        const labelEl = buttonEl.querySelector('.btn-label');
+
+        const resetBtn = () => {
+            buttonEl.disabled = false;
+            buttonEl.classList.remove('loading');
+            if (labelEl) labelEl.textContent = 'Refresh Radarr Status';
+        };
+
+        // Enter loading state
+        buttonEl.disabled = true;
+        buttonEl.classList.add('loading');
+        if (labelEl) labelEl.textContent = 'Fetching from Radarr…';
+
+        let pollInterval = null;
+        let pollFailures = 0;
+        const MAX_POLL_FAILURES = 5;
+        const MAX_POLL_MS = 10 * 60 * 1000; // 10-minute safety timeout
+        const pollStart = Date.now();
+
+        const stopPolling = () => {
+            if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
+        };
 
         try {
-            const response = await fetch(apiUrl('/movies/refresh-stored-status'), {
-                method: 'POST'
-            });
-            const data = await response.json();
-
-            if (!response.ok || !data.success) {
-                throw new Error(data.detail || data.message || 'Failed to refresh movie data');
+            const res = await fetch(apiUrl('/movies/refresh-stored-status'), { method: 'POST' });
+            const data = await res.json();
+            if (!res.ok || !data.success) {
+                throw new Error(data.detail || data.message || 'Failed to start refresh');
             }
 
-            showMessage(
-                `Refreshed ${data.movies_refreshed || 0} movie entries across ${data.weeks_updated || 0} weeks`,
-                'success'
-            );
-            setTimeout(() => window.location.reload(), 800);
+            pollInterval = setInterval(async () => {
+                if (Date.now() - pollStart > MAX_POLL_MS) {
+                    stopPolling();
+                    resetBtn();
+                    showMessage('Refresh is taking too long. It may still be running in the background.', 'error');
+                    return;
+                }
+
+                try {
+                    const pr = await fetch(apiUrl('/movies/refresh-stored-status/progress'));
+                    if (!pr.ok) {
+                        if (++pollFailures >= MAX_POLL_FAILURES) {
+                            stopPolling();
+                            resetBtn();
+                            showMessage('Lost connection to refresh progress. The job may still be running.', 'error');
+                        }
+                        return;
+                    }
+                    pollFailures = 0;
+                    const p = await pr.json();
+
+                    if (p.error) {
+                        stopPolling();
+                        resetBtn();
+                        showMessage('Refresh failed: ' + p.error, 'error');
+                        return;
+                    }
+
+                    if (p.complete) {
+                        stopPolling();
+                        showMessage(
+                            `Refreshed ${p.refreshed || 0} movies across ${p.updated || 0} weeks`,
+                            'success'
+                        );
+                        resetBtn();
+                        setTimeout(() => { window.location.href = window.location.href; }, 1500);
+                    }
+                } catch (pollErr) {
+                    console.warn('Refresh poll error:', pollErr);
+                    if (++pollFailures >= MAX_POLL_FAILURES) {
+                        stopPolling();
+                        resetBtn();
+                        showMessage('Lost connection to refresh progress. The job may still be running.', 'error');
+                    }
+                }
+            }, 500);
+
         } catch (error) {
-            showMessage('Failed to refresh stored movie data: ' + error.message, 'error');
-            if (buttonEl) {
-                buttonEl.disabled = false;
-                buttonEl.textContent = originalText;
-            }
-            return;
-        }
-
-        if (buttonEl) {
-            buttonEl.disabled = false;
-            buttonEl.textContent = originalText;
+            stopPolling();
+            resetBtn();
+            showMessage('Failed to start refresh: ' + error.message, 'error');
         }
     };
 
@@ -1703,7 +1603,7 @@ function reloadScheduler() {
             }
         } catch (err) {
             buttonEl.textContent = origText;
-            showToast('Error: ' + err.message, 'error');
+            showMessage('Error: ' + err.message, 'error');
         } finally {
             buttonEl.disabled = false;
         }

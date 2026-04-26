@@ -1,10 +1,17 @@
 """Boxarr API application."""
 
+import asyncio
+import hashlib
+from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from starlette.middleware.base import BaseHTTPMiddleware
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 from .. import __version__
@@ -12,6 +19,7 @@ from ..core.radarr import RadarrService
 from ..core.scheduler import BoxarrScheduler
 from ..utils.config import settings
 from ..utils.logger import get_logger
+from .limiter import limiter
 from .routes import (
     admin_router,
     boxoffice_router,
@@ -22,6 +30,25 @@ from .routes import (
 )
 
 logger = get_logger(__name__)
+
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "SAMEORIGIN"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Permissions-Policy"] = (
+            "camera=(), microphone=(), geolocation=()"
+        )
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+            "style-src 'self' 'unsafe-inline'; "
+            "img-src 'self' data: https:; "
+            "connect-src 'self';"
+        )
+        return response
 
 
 def create_app(scheduler: Optional[BoxarrScheduler] = None) -> FastAPI:
@@ -47,10 +74,20 @@ def create_app(scheduler: Optional[BoxarrScheduler] = None) -> FastAPI:
         redoc_url="/api/redoc",
     )
 
+    # Attach rate limiter
+    app.state.limiter = limiter
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type]
+
     # Add ProxyHeadersMiddleware to handle reverse proxy headers
     # Note: Remove trusted_hosts parameter for better security
     # Only add specific hosts if needed: trusted_hosts=["proxy.example.com"]
     app.add_middleware(ProxyHeadersMiddleware)
+
+    # GZip compress responses >= 500 bytes (JSON payloads, HTML pages)
+    app.add_middleware(GZipMiddleware, minimum_size=500)
+
+    # Inject security headers on every response
+    app.add_middleware(SecurityHeadersMiddleware)
 
     # Add CORS middleware for local network access
     app.add_middleware(
@@ -85,6 +122,19 @@ def create_app(scheduler: Optional[BoxarrScheduler] = None) -> FastAPI:
         """Initialize application on startup."""
         logger.info("Boxarr API starting up...")
 
+        # Compute content-hash fingerprints for static assets
+        static_dir = Path("src/web/static")
+        hashes: dict = {}
+        if static_dir.exists():
+            for f in static_dir.rglob("*"):
+                if f.is_file():
+                    h = hashlib.md5(f.read_bytes(), usedforsecurity=False).hexdigest()[
+                        :8
+                    ]
+                    hashes[str(f.relative_to(static_dir)).replace("\\", "/")] = h
+        app.state.asset_hashes = hashes
+        logger.info(f"Asset fingerprints computed ({len(hashes)} files)")
+
         # Start scheduler if configured and enabled
         if scheduler and settings.boxarr_scheduler_enabled:
             scheduler.start()
@@ -107,7 +157,7 @@ def create_app(scheduler: Optional[BoxarrScheduler] = None) -> FastAPI:
         if settings.radarr_api_key:
             try:
                 with RadarrService() as r:
-                    radarr_connected = r.test_connection()
+                    radarr_connected = await asyncio.to_thread(r.test_connection)
             except Exception:
                 radarr_connected = False
 

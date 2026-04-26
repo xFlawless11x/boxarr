@@ -1,17 +1,19 @@
 """Configuration management routes."""
 
+import asyncio
 import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from ... import __version__
 from ...core.radarr import RadarrService
 from ...utils.config import RootFolderConfig, RootFolderMapping, Settings, settings
 from ...utils.logger import get_logger
+from ..limiter import limiter
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/api/config", tags=["configuration"])
@@ -116,19 +118,19 @@ async def test_configuration(config: TestConfigRequest):
     try:
         test_service = RadarrService(url=config.url, api_key=config.api_key)
 
-        if not test_service.test_connection():
+        if not await asyncio.to_thread(test_service.test_connection):
             return {
                 "success": False,
                 "message": "Could not connect to Radarr. Check URL and API key.",
             }
 
-        # Get profiles and folders
-        profiles = test_service.get_quality_profiles()
-        folders = test_service.get_root_folders()
+        # Get profiles and folders (blocking API calls → thread)
+        profiles = await asyncio.to_thread(test_service.get_quality_profiles)
+        folders = await asyncio.to_thread(test_service.get_root_folders)
 
         # Get Radarr version
         try:
-            status = test_service.get_system_status()
+            status = await asyncio.to_thread(test_service.get_system_status)
             version = status.get("version", "Unknown")
         except Exception:
             version = "Unknown"
@@ -149,7 +151,8 @@ async def test_configuration(config: TestConfigRequest):
 
 
 @router.post("/save")
-async def save_configuration(config: SaveConfigRequest):
+@limiter.limit("10/minute")
+async def save_configuration(request: Request, config: SaveConfigRequest):
     """Save configuration to file."""
     try:
         data_directory = Path(
@@ -178,7 +181,7 @@ async def save_configuration(config: SaveConfigRequest):
             url=config.radarr_url, api_key=config.radarr_api_key
         )
 
-        if not test_service.test_connection():
+        if not await asyncio.to_thread(test_service.test_connection):
             return {
                 "success": False,
                 "message": "Cannot save: Radarr connection failed",

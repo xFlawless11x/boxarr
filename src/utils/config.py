@@ -1,11 +1,13 @@
 """Configuration management for Boxarr using pydantic-settings."""
 
 import os
+import threading
 from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 import yaml
+from apscheduler.triggers.cron import CronTrigger
 from pydantic import BaseModel, Field, HttpUrl, validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -259,6 +261,14 @@ class Settings(BaseSettings):
         default="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         description="Log format string",
     )
+
+    @validator("boxarr_scheduler_cron")
+    def validate_cron_expression(cls, v: str) -> str:
+        try:
+            CronTrigger.from_crontab(v)
+        except (ValueError, TypeError) as e:
+            raise ValueError(f"Invalid cron expression '{v}': {e}") from e
+        return v
 
     @validator("boxarr_port", pre=True)
     def check_port_env(cls, v: int) -> int:
@@ -516,11 +526,13 @@ class Settings(BaseSettings):
     def reload_from_file(cls, config_path: Path) -> None:
         """Reload settings from file by clearing the cache."""
         global _settings
-        _settings = None  # Clear cache to force reload
+        with _settings_lock:
+            _settings = None
 
 
 # Lazy-loaded settings to avoid import-time side effects
 _settings: Optional[Settings] = None
+_settings_lock = threading.Lock()
 
 
 def load_settings() -> Settings:
@@ -555,7 +567,9 @@ def get_settings() -> Settings:
     """Get settings instance (lazy-loaded to avoid import side effects)."""
     global _settings
     if _settings is None:
-        _settings = load_settings()
+        with _settings_lock:
+            if _settings is None:  # double-checked locking
+                _settings = load_settings()
     return _settings
 
 
